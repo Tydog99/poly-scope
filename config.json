@@ -1,0 +1,22 @@
+{
+  "weights": {
+    "tradeSize": 40,
+    "accountHistory": 35,
+    "conviction": 25
+  },
+  "tradeSize": {
+    "minAbsoluteUsd": 5000,
+    "minImpactPercent": 2,
+    "impactWindowMinutes": 5
+  },
+  "accountHistory": {
+    "maxLifetimeTrades": 10,
+    "maxAccountAgeDays": 30,
+    "minDormancyDays": 60
+  },
+  "conviction": {
+    "minPositionPercent": 80
+  },
+  "alertThreshold": 70,
+  "watchlist": []
+}
