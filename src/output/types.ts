@@ -15,7 +15,7 @@ export interface SuspiciousTrade {
 export interface AnalysisReport {
   market: Market;
   totalTrades: number;
-  winningTrades: number;
+  analyzedTrades: number;
   suspiciousTrades: SuspiciousTrade[];
   analyzedAt: Date;
 }

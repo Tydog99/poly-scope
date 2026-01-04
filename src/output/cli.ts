@@ -8,9 +8,13 @@ export class CLIReporter {
     // Header
     lines.push('');
     lines.push(chalk.bold(`Market: "${report.market.question}"`));
-    lines.push(chalk.gray(`→ Resolved ${chalk.green(report.market.winningOutcome?.toUpperCase())}`));
+    if (report.market.winningOutcome) {
+      lines.push(chalk.gray(`→ Resolved ${chalk.green(report.market.winningOutcome.toUpperCase())}`));
+    } else {
+      lines.push(chalk.yellow('→ Unresolved (analyzing all trades)'));
+    }
     lines.push('');
-    lines.push(chalk.gray(`Total trades: ${report.totalTrades} | Winning side: ${report.winningTrades}`));
+    lines.push(chalk.gray(`Total trades: ${report.totalTrades} | Analyzed: ${report.analyzedTrades}`));
     lines.push('');
 
     if (report.suspiciousTrades.length === 0) {

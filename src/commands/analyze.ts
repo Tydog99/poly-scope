@@ -42,15 +42,25 @@ export class AnalyzeCommand {
       before: options.before,
     });
 
-    // 3. Filter to winning side
-    const winningTrades = allTrades.filter(t =>
-      t.outcome === market.winningOutcome?.toUpperCase()
-    );
+    // 3. Filter trades
+    let tradesToAnalyze: Trade[];
+    if (options.outcome) {
+      // User specified an outcome filter
+      tradesToAnalyze = allTrades.filter(t => t.outcome === options.outcome);
+    } else if (market.winningOutcome) {
+      // Resolved market: filter to winning side
+      tradesToAnalyze = allTrades.filter(t =>
+        t.outcome === market.winningOutcome?.toUpperCase()
+      );
+    } else {
+      // Unresolved market: analyze all trades
+      tradesToAnalyze = allTrades;
+    }
 
     // 4. Score each trade
     const scoredTrades: SuspiciousTrade[] = [];
 
-    for (const trade of winningTrades) {
+    for (const trade of tradesToAnalyze) {
       // Quick score first (without account history)
       const quickContext: SignalContext = { config: this.config };
       const quickResults = await Promise.all(
@@ -89,7 +99,7 @@ export class AnalyzeCommand {
     return {
       market,
       totalTrades: allTrades.length,
-      winningTrades: winningTrades.length,
+      analyzedTrades: tradesToAnalyze.length,
       suspiciousTrades: scoredTrades.slice(0, 10), // Top 10
       analyzedAt: new Date(),
     };

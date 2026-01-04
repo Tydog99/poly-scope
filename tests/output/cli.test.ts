@@ -14,7 +14,7 @@ const mockReport: AnalysisReport = {
     winningOutcome: 'Yes',
   },
   totalTrades: 100,
-  winningTrades: 45,
+  analyzedTrades: 45,
   suspiciousTrades: [
     {
       trade: {
