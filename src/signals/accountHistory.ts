@@ -1,4 +1,4 @@
-import type { Signal, SignalResult, Trade, SignalContext } from './types.js';
+import type { Signal, SignalResult, Trade, SignalContext, AccountHistory } from './types.js';
 
 export class AccountHistorySignal implements Signal {
   name = 'accountHistory';
@@ -19,55 +19,130 @@ export class AccountHistorySignal implements Signal {
     }
 
     const now = new Date();
+
+    // Use creationDate from subgraph if available, otherwise fall back to firstTradeDate
+    const accountCreationDate = accountHistory.creationDate || accountHistory.firstTradeDate;
     const accountAgeDays = Math.floor(
-      (now.getTime() - accountHistory.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24)
+      (now.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     const dormancyDays = accountHistory.lastTradeDate
       ? Math.floor(
-          (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) / (1000 * 60 * 60 * 24)
+          (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) /
+            (1000 * 60 * 60 * 24)
         )
       : 0;
 
-    // Calculate component scores (each 0-33)
-    const tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades);
-    const ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays);
-    const dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays);
+    // Calculate component scores
+    // When we have profit data, use 4 components (each 0-25)
+    // Otherwise use 3 components (each 0-33) for backward compatibility
+    const hasProfit = accountHistory.profitUsd !== undefined;
 
-    const totalScore = Math.round(tradeCountScore + ageScore + dormancyScore);
+    let tradeCountScore: number;
+    let ageScore: number;
+    let dormancyScore: number;
+    let profitScore = 0;
+
+    if (hasProfit) {
+      // 4-component scoring (each 0-25 max)
+      tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades, 25);
+      ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 25);
+      dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 25);
+      profitScore = this.scoreProfitOnNewAccount(
+        accountHistory.profitUsd!,
+        accountAgeDays,
+        accountHistory.totalVolumeUsd
+      );
+    } else {
+      // 3-component scoring for backward compatibility
+      tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades, 33);
+      ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 33);
+      dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 34);
+    }
+
+    const totalScore = Math.round(tradeCountScore + ageScore + dormancyScore + profitScore);
+
+    const details: Record<string, unknown> = {
+      totalTrades: accountHistory.totalTrades,
+      accountAgeDays,
+      dormancyDays,
+      tradeCountScore: Math.round(tradeCountScore),
+      ageScore: Math.round(ageScore),
+      dormancyScore: Math.round(dormancyScore),
+      dataSource: accountHistory.dataSource || 'data-api',
+    };
+
+    if (hasProfit) {
+      details.profitUsd = accountHistory.profitUsd;
+      details.profitScore = Math.round(profitScore);
+    }
 
     return {
       name: this.name,
       score: Math.min(100, totalScore),
       weight: this.weight,
-      details: {
-        totalTrades: accountHistory.totalTrades,
-        accountAgeDays,
-        dormancyDays,
-        tradeCountScore: Math.round(tradeCountScore),
-        ageScore: Math.round(ageScore),
-        dormancyScore: Math.round(dormancyScore),
-      },
+      details,
     };
   }
 
-  private scoreTradeCount(count: number, threshold: number): number {
+  private scoreTradeCount(count: number, threshold: number, maxScore: number): number {
     if (count >= threshold * 10) return 0;
-    if (count <= threshold) return 33;
+    if (count <= threshold) return maxScore;
     // Linear decay from threshold to threshold*10
-    return 33 * (1 - (count - threshold) / (threshold * 9));
+    return maxScore * (1 - (count - threshold) / (threshold * 9));
   }
 
-  private scoreAccountAge(days: number, threshold: number): number {
+  private scoreAccountAge(days: number, threshold: number, maxScore: number): number {
     if (days >= threshold * 12) return 0; // Over a year
-    if (days <= threshold) return 33;
-    return 33 * (1 - (days - threshold) / (threshold * 11));
+    if (days <= threshold) return maxScore;
+    return maxScore * (1 - (days - threshold) / (threshold * 11));
   }
 
-  private scoreDormancy(days: number, threshold: number): number {
+  private scoreDormancy(days: number, threshold: number, maxScore: number): number {
     if (days < threshold) return 0;
     // Score increases with dormancy, caps at 2x threshold
     const excess = days - threshold;
-    return Math.min(34, (excess / threshold) * 34);
+    return Math.min(maxScore, (excess / threshold) * maxScore);
+  }
+
+  /**
+   * Score based on profit for new accounts.
+   * Large profits on new accounts with few trades are suspicious.
+   * Large losses are not suspicious (just bad luck/skill).
+   */
+  private scoreProfitOnNewAccount(
+    profitUsd: number,
+    accountAgeDays: number,
+    volumeUsd: number
+  ): number {
+    const maxScore = 25;
+
+    // Only suspicious if profit is positive and account is relatively new
+    if (profitUsd <= 0 || accountAgeDays > 90) {
+      return 0;
+    }
+
+    // Calculate profit rate (profit as percentage of volume)
+    const profitRate = volumeUsd > 0 ? profitUsd / volumeUsd : 0;
+
+    // High profit rate (>20%) on a new account (<30 days) is very suspicious
+    // Suggests informed trading / insider knowledge
+    if (accountAgeDays <= 30) {
+      if (profitRate > 0.5) return maxScore; // >50% return in first month
+      if (profitRate > 0.3) return maxScore * 0.8;
+      if (profitRate > 0.2) return maxScore * 0.6;
+      if (profitRate > 0.1) return maxScore * 0.4;
+      if (profitUsd > 10000) return maxScore * 0.3; // Large absolute profit
+    } else if (accountAgeDays <= 60) {
+      if (profitRate > 0.5) return maxScore * 0.6;
+      if (profitRate > 0.3) return maxScore * 0.4;
+      if (profitRate > 0.2) return maxScore * 0.2;
+    } else {
+      // 60-90 days
+      if (profitRate > 0.5) return maxScore * 0.3;
+      if (profitRate > 0.3) return maxScore * 0.2;
+    }
+
+    return 0;
   }
 }

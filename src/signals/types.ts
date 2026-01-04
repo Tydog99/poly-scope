@@ -41,6 +41,10 @@ export interface AccountHistory {
   firstTradeDate: Date | null;
   lastTradeDate: Date | null;
   totalVolumeUsd: number;
+  // Enhanced fields from subgraph (optional for backward compatibility)
+  creationDate?: Date; // True account creation from blockchain
+  profitUsd?: number; // Lifetime P&L
+  dataSource?: 'data-api' | 'subgraph';
 }
 
 export interface PricePoint {
