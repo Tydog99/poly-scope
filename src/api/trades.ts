@@ -27,6 +27,7 @@ export interface GetTradesOptions {
   before?: Date;
   outcome?: 'YES' | 'NO';
   maxTrades?: number;
+  allowDataApiFallback?: boolean; // Default true - set false to use subgraph only
 }
 
 export class TradeFetcher {
@@ -56,13 +57,33 @@ export class TradeFetcher {
           const merged = this.cache.merge(marketId, trades);
           return this.applyFilters(merged.trades, options);
         }
+        // No trades from subgraph - could be empty market or issue
+        if (options.allowDataApiFallback === false) {
+          console.log('Subgraph returned no trades');
+          return [];
+        }
         console.log('Subgraph returned no trades, falling back to Data API');
       } catch (error) {
+        if (options.allowDataApiFallback === false) {
+          throw error; // Don't fall back if explicitly disabled
+        }
         console.log(`Subgraph error, falling back to Data API: ${error}`);
       }
     }
 
     // Fall back to Data API
+    return this.fetchFromDataApi(marketId, options, maxTrades, cached);
+  }
+
+  /**
+   * Fetch trades from Data API
+   */
+  private async fetchFromDataApi(
+    marketId: string,
+    options: GetTradesOptions,
+    maxTrades: number,
+    cached: { newestTimestamp: number; trades: Trade[] } | null
+  ): Promise<Trade[]> {
     const newTrades = await this.fetchNewTradesFromDataApi(
       marketId,
       cached?.newestTimestamp ?? 0,
@@ -113,8 +134,12 @@ export class TradeFetcher {
       return [];
     }
 
+    const totalLimit = options.maxTrades ?? 10000;
+    const numTokens = options.market.tokens.length;
+    const perTokenLimit = Math.ceil(totalLimit / numTokens);
+
     const queryOptions: TradeQueryOptions = {
-      limit: options.maxTrades ?? 10000,
+      limit: perTokenLimit,
       after: options.after,
       before: options.before,
       orderDirection: 'desc',
@@ -136,8 +161,12 @@ export class TradeFetcher {
 
     console.log(`Fetched ${allSubgraphTrades.length} trades from subgraph`);
 
+    // Sort by timestamp descending and limit to total
+    allSubgraphTrades.sort((a, b) => b.timestamp - a.timestamp);
+    const limitedTrades = allSubgraphTrades.slice(0, totalLimit);
+
     // Convert to Trade type
-    return allSubgraphTrades.map((st) => this.convertSubgraphTrade(st, marketId, tokenToOutcome));
+    return limitedTrades.map((st) => this.convertSubgraphTrade(st, marketId, tokenToOutcome));
   }
 
   /**
@@ -148,9 +177,11 @@ export class TradeFetcher {
     conditionId: string,
     tokenToOutcome: Map<string, 'YES' | 'NO'>
   ): Trade {
-    // Size and price are in 6 decimal format
-    const size = parseFloat(st.size) / 1e6;
-    const price = parseFloat(st.price) / 1e6;
+    // In subgraph: size is USD value (6 decimals), price is already a decimal string
+    const valueUsd = parseFloat(st.size) / 1e6;
+    const price = parseFloat(st.price); // Already 0-1 range, not 6 decimals
+    // Calculate number of shares from USD value and price
+    const size = price > 0 ? valueUsd / price : 0;
 
     // Determine outcome from token ID
     const outcome = tokenToOutcome.get(st.marketId.toLowerCase()) ?? 'YES';
@@ -169,7 +200,7 @@ export class TradeFetcher {
       size,
       price,
       timestamp: new Date(st.timestamp * 1000),
-      valueUsd: size * price,
+      valueUsd,
     };
   }
 

@@ -249,13 +249,15 @@ export class SubgraphClient {
 
   /**
    * Get trades for a specific market (token ID / orderbook)
+   * Uses pagination to fetch all trades (subgraph max is 1000 per request)
    */
   async getTradesByMarket(
     marketId: string,
     options: TradeQueryOptions = {}
   ): Promise<SubgraphTrade[]> {
-    const limit = options.limit || 1000;
+    const maxTotal = options.limit || 10000;
     const orderDirection = options.orderDirection || 'desc';
+    const pageSize = 1000; // Subgraph max per request
 
     // Build time filters
     const timeFilters: string[] = [];
@@ -267,28 +269,48 @@ export class SubgraphClient {
     }
     const timeFilter = timeFilters.length > 0 ? `, ${timeFilters.join(', ')}` : '';
 
-    const result = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-      query($marketId: String!, $limit: Int!) {
-        enrichedOrderFilleds(
-          first: $limit,
-          where: { market: $marketId${timeFilter} }
-          orderBy: timestamp
-          orderDirection: ${orderDirection}
-        ) {
-          id
-          transactionHash
-          timestamp
-          maker { id }
-          taker { id }
-          market { id }
-          side
-          size
-          price
-        }
-      }
-    `, { marketId: marketId.toLowerCase(), limit });
+    const allTrades: SubgraphTrade[] = [];
+    let skip = 0;
 
-    return (result?.enrichedOrderFilleds || []).map((t) => this.mapTrade(t));
+    while (allTrades.length < maxTotal) {
+      const result = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
+        query($marketId: String!, $first: Int!, $skip: Int!) {
+          enrichedOrderFilleds(
+            first: $first,
+            skip: $skip,
+            where: { market: $marketId${timeFilter} }
+            orderBy: timestamp
+            orderDirection: ${orderDirection}
+          ) {
+            id
+            transactionHash
+            timestamp
+            maker { id }
+            taker { id }
+            market { id }
+            side
+            size
+            price
+          }
+        }
+      `, { marketId: marketId.toLowerCase(), first: pageSize, skip });
+
+      const trades = (result?.enrichedOrderFilleds || []).map((t) => this.mapTrade(t));
+
+      if (trades.length === 0) break; // No more trades
+
+      allTrades.push(...trades);
+      skip += pageSize;
+
+      if (trades.length < pageSize) break; // Last page
+
+      // Log progress for large fetches
+      if (allTrades.length >= 1000 && allTrades.length % 2000 === 0) {
+        console.log(`  Fetched ${allTrades.length} trades from subgraph...`);
+      }
+    }
+
+    return allTrades.slice(0, maxTotal);
   }
 
   /**

@@ -166,8 +166,8 @@ describe('TradeFetcher', () => {
       taker: '0xtaker',
       marketId: '0xyes_token',
       side: 'Buy' as const,
-      size: '1000000000', // 1000 in 6 decimals
-      price: '500000', // 0.5 in 6 decimals
+      size: '500000000', // 500 USD in 6 decimals
+      price: '0.5', // price as decimal string (not 6 decimals)
     };
 
     it('uses subgraph as primary when available', async () => {
@@ -195,9 +195,9 @@ describe('TradeFetcher', () => {
       expect(trades[0].wallet).toBe('0xtaker');
       expect(trades[0].outcome).toBe('YES');
       expect(trades[0].side).toBe('BUY');
-      expect(trades[0].size).toBe(1000);
+      expect(trades[0].size).toBe(1000); // 500 USD / 0.5 price = 1000 shares
       expect(trades[0].price).toBe(0.5);
-      expect(trades[0].valueUsd).toBe(500);
+      expect(trades[0].valueUsd).toBe(500); // 500 USD
     });
 
     it('falls back to Data API when subgraph fails', async () => {
