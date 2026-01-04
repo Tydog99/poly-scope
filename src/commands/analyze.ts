@@ -11,6 +11,7 @@ export interface AnalyzeOptions {
   after?: Date;
   before?: Date;
   outcome?: 'YES' | 'NO';
+  maxTrades?: number;
 }
 
 export class AnalyzeCommand {
@@ -40,6 +41,7 @@ export class AnalyzeCommand {
     const allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
       after: options.after,
       before: options.before,
+      maxTrades: options.maxTrades,
     });
 
     // 3. Filter trades
@@ -59,8 +61,17 @@ export class AnalyzeCommand {
 
     // 4. Score each trade
     const scoredTrades: SuspiciousTrade[] = [];
+    let processed = 0;
+    let accountFetches = 0;
+
+    console.log(`Scoring ${tradesToAnalyze.length} trades...`);
 
     for (const trade of tradesToAnalyze) {
+      processed++;
+      if (processed % 100 === 0) {
+        console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
+      }
+
       // Quick score first (without account history)
       const quickContext: SignalContext = { config: this.config };
       const quickResults = await Promise.all(
@@ -68,10 +79,11 @@ export class AnalyzeCommand {
       );
       const quickScore = this.aggregator.aggregate(quickResults);
 
-      // Only fetch account history for promising scores
+      // Only fetch account history for high-scoring trades (limit API calls)
       let accountHistory;
-      if (quickScore.total > 50) {
+      if (quickScore.total > 60 && accountFetches < 50) {
         accountHistory = await this.accountFetcher.getAccountHistory(trade.wallet);
+        accountFetches++;
       }
 
       // Final score with all context
@@ -92,6 +104,8 @@ export class AnalyzeCommand {
         });
       }
     }
+
+    console.log(`Scoring complete. Found ${scoredTrades.length} suspicious trades.`);
 
     // 5. Sort by score descending
     scoredTrades.sort((a, b) => b.score.total - a.score.total);
