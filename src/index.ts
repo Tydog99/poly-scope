@@ -26,12 +26,14 @@ program
   .option('--max-trades <number>', 'Max trades to fetch initially (default: 10000)', parseInt)
   .option('--min-size <usd>', 'Override minimum trade size', parseFloat)
   .option('--threshold <score>', 'Override alert threshold', parseFloat)
+  .option('--no-subgraph', 'Disable subgraph and use Data API only')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
 
     // Apply CLI overrides
     if (opts.minSize) config.tradeSize.minAbsoluteUsd = opts.minSize;
     if (opts.threshold) config.alertThreshold = opts.threshold;
+    if (opts.subgraph === false) config.subgraph.enabled = false;
 
     const command = new AnalyzeCommand(config);
     const reporter = new CLIReporter();
@@ -81,8 +83,13 @@ program
   .requiredOption('-w, --wallet <address>', 'Wallet address to investigate')
   .option('--trades <number>', 'Number of recent trades to show (default: 20)', parseInt)
   .option('--config <path>', 'Path to config file', './config.json')
+  .option('--no-subgraph', 'Disable subgraph and use Data API only')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
+
+    // Apply CLI overrides
+    if (opts.subgraph === false) config.subgraph.enabled = false;
+
     const command = new InvestigateCommand(config);
     const reporter = new CLIReporter();
 

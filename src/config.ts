@@ -19,6 +19,11 @@ export interface Config {
   conviction: {
     minPositionPercent: number;
   };
+  subgraph: {
+    enabled: boolean;
+    timeout: number;
+    retries: number;
+  };
   alertThreshold: number;
   watchlist: string[];
 }
@@ -42,6 +47,11 @@ export const DEFAULT_CONFIG: Config = {
   conviction: {
     minPositionPercent: 80,
   },
+  subgraph: {
+    enabled: true,
+    timeout: 30000,
+    retries: 2,
+  },
   alertThreshold: 70,
   watchlist: [],
 };
@@ -61,5 +71,6 @@ export function loadConfig(path: string = './config.json'): Config {
     tradeSize: { ...DEFAULT_CONFIG.tradeSize, ...userConfig.tradeSize },
     accountHistory: { ...DEFAULT_CONFIG.accountHistory, ...userConfig.accountHistory },
     conviction: { ...DEFAULT_CONFIG.conviction, ...userConfig.conviction },
+    subgraph: { ...DEFAULT_CONFIG.subgraph, ...userConfig.subgraph },
   };
 }

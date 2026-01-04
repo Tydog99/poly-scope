@@ -23,13 +23,24 @@ export class InvestigateCommand {
   private subgraphClient: SubgraphClient | null;
 
   constructor(private config: Config) {
-    this.subgraphClient = createSubgraphClient();
+    // Create subgraph client if enabled and API key is available
+    if (config.subgraph.enabled) {
+      this.subgraphClient = createSubgraphClient({
+        timeout: config.subgraph.timeout,
+        retries: config.subgraph.retries,
+      });
+    } else {
+      this.subgraphClient = null;
+    }
+
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
     });
 
     if (this.subgraphClient) {
       console.log('Using The Graph subgraph for wallet investigation');
+    } else if (!config.subgraph.enabled) {
+      console.log('Subgraph disabled - using Data API only');
     } else {
       console.log('Warning: No subgraph API key - limited data available');
     }

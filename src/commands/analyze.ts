@@ -25,10 +25,16 @@ export class AnalyzeCommand {
   constructor(private config: Config) {
     this.client = new PolymarketClient();
 
-    // Create subgraph client if API key is available
-    const subgraphClient = createSubgraphClient();
-    if (subgraphClient) {
-      console.log('Using The Graph subgraph as primary data source');
+    // Create subgraph client if enabled and API key is available
+    let subgraphClient = null;
+    if (config.subgraph.enabled) {
+      subgraphClient = createSubgraphClient({
+        timeout: config.subgraph.timeout,
+        retries: config.subgraph.retries,
+      });
+      if (subgraphClient) {
+        console.log('Using The Graph subgraph as primary data source');
+      }
     }
 
     this.tradeFetcher = new TradeFetcher({ subgraphClient });

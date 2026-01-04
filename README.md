@@ -35,6 +35,10 @@ npm run dev -- investigate -w 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
 
 # Show more trades in investigation
 npm run dev -- investigate -w <wallet> --trades 50
+
+# Disable subgraph (use Data API only)
+npm run dev -- analyze -m <market> --no-subgraph
+npm run dev -- investigate -w <wallet> --no-subgraph
 ```
 
 ## Caching
