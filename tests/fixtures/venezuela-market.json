@@ -1,0 +1,45 @@
+{
+  "market": {
+    "conditionId": "0x123abc",
+    "question": "Will US bomb Venezuela by Feb 2025?",
+    "outcomes": ["Yes", "No"],
+    "resolved": true,
+    "winningOutcome": "Yes"
+  },
+  "trades": [
+    {
+      "id": "insider-trade-1",
+      "wallet": "0xsuspicious1",
+      "side": "BUY",
+      "outcome": "YES",
+      "size": 1000000,
+      "price": 0.12,
+      "timestamp": "2026-01-01T10:00:00Z",
+      "valueUsd": 100000
+    },
+    {
+      "id": "normal-trade-1",
+      "wallet": "0xnormal1",
+      "side": "BUY",
+      "outcome": "YES",
+      "size": 500,
+      "price": 0.15,
+      "timestamp": "2026-01-01T11:00:00Z",
+      "valueUsd": 75
+    }
+  ],
+  "accounts": {
+    "0xsuspicious1": {
+      "totalTrades": 1,
+      "firstTradeDate": "2026-01-01T10:00:00Z",
+      "lastTradeDate": "2025-10-01T10:00:00Z",
+      "totalVolumeUsd": 100000
+    },
+    "0xnormal1": {
+      "totalTrades": 250,
+      "firstTradeDate": "2023-01-01T00:00:00Z",
+      "lastTradeDate": "2026-01-01T11:00:00Z",
+      "totalVolumeUsd": 150000
+    }
+  }
+}
