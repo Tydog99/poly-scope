@@ -1,42 +1,26 @@
-import { ClobClient } from '@polymarket/clob-client';
-import { Wallet } from 'ethers';
 import type { AccountHistory } from '../signals/types.js';
 
-const CLOB_HOST = 'https://clob.polymarket.com';
-const CHAIN_ID = 137;
+const DATA_API = 'https://data-api.polymarket.com';
 
-interface RawAccountTrade {
-  timestamp: string;
+interface DataApiTrade {
+  proxyWallet: string;
   size: string;
   price: string;
+  timestamp: number;
 }
 
 export class AccountFetcher {
-  private client: ClobClient;
+  async getAccountHistory(wallet: string): Promise<AccountHistory> {
+    const url = new URL(`${DATA_API}/trades`);
+    url.searchParams.set('user', wallet);
+    url.searchParams.set('limit', '1000');
 
-  constructor() {
-    const privateKey = process.env.POLY_PRIVATE_KEY;
-    const apiKey = process.env.POLY_API_KEY;
-    const secret = process.env.POLY_API_SECRET;
-    const passphrase = process.env.POLY_PASSPHRASE;
-
-    if (!privateKey || !apiKey || !secret || !passphrase) {
-      throw new Error(
-        'Missing credentials. Set POLY_PRIVATE_KEY, POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE.\n' +
-        'Run: npx tsx scripts/get-api-keys.ts --private-key 0x...'
-      );
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      throw new Error(`Failed to fetch account history: ${response.statusText}`);
     }
 
-    const signer = new Wallet(privateKey);
-    this.client = new ClobClient(CLOB_HOST, CHAIN_ID, signer, {
-      key: apiKey,
-      secret,
-      passphrase,
-    });
-  }
-
-  async getAccountHistory(wallet: string): Promise<AccountHistory> {
-    const trades = await this.client.getTrades({ maker_address: wallet }) as unknown as RawAccountTrade[];
+    const trades = await response.json() as DataApiTrade[];
 
     if (trades.length === 0) {
       return {
@@ -48,7 +32,7 @@ export class AccountFetcher {
       };
     }
 
-    const timestamps = trades.map(t => parseInt(t.timestamp) * 1000);
+    const timestamps = trades.map(t => t.timestamp);
     const volumes = trades.map(t => parseFloat(t.size) * parseFloat(t.price));
 
     return {

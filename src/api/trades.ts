@@ -1,35 +1,19 @@
-import { ClobClient } from '@polymarket/clob-client';
-import { Wallet } from 'ethers';
 import type { Trade } from '../signals/types.js';
-import type { RawTrade } from './types.js';
 
-const CLOB_HOST = 'https://clob.polymarket.com';
-const CHAIN_ID = 137;
+const DATA_API = 'https://data-api.polymarket.com';
+
+interface DataApiTrade {
+  proxyWallet: string;
+  side: 'BUY' | 'SELL';
+  size: string;
+  price: string;
+  timestamp: number;
+  conditionId: string;
+  outcome: string;
+  transactionHash: string;
+}
 
 export class TradeFetcher {
-  private client: ClobClient;
-
-  constructor() {
-    const privateKey = process.env.POLY_PRIVATE_KEY;
-    const apiKey = process.env.POLY_API_KEY;
-    const secret = process.env.POLY_API_SECRET;
-    const passphrase = process.env.POLY_PASSPHRASE;
-
-    if (!privateKey || !apiKey || !secret || !passphrase) {
-      throw new Error(
-        'Missing credentials. Set POLY_PRIVATE_KEY, POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE.\n' +
-        'Run: npx tsx scripts/get-api-keys.ts --private-key 0x...'
-      );
-    }
-
-    const signer = new Wallet(privateKey);
-    this.client = new ClobClient(CLOB_HOST, CHAIN_ID, signer, {
-      key: apiKey,
-      secret,
-      passphrase,
-    });
-  }
-
   async getTradesForMarket(
     marketId: string,
     options: {
@@ -38,35 +22,56 @@ export class TradeFetcher {
       outcome?: 'YES' | 'NO';
     } = {}
   ): Promise<Trade[]> {
-    const rawTrades = await this.client.getTrades({ market: marketId }) as unknown as RawTrade[];
+    const allTrades: Trade[] = [];
+    let offset = 0;
+    const limit = 1000;
 
-    const trades: Trade[] = [];
-    for (const raw of rawTrades) {
-      const trade = this.convertTrade(raw, marketId);
+    while (true) {
+      const url = new URL(`${DATA_API}/trades`);
+      url.searchParams.set('market', marketId);
+      url.searchParams.set('limit', limit.toString());
+      url.searchParams.set('offset', offset.toString());
 
-      // Apply filters
-      if (options.after && trade.timestamp < options.after) continue;
-      if (options.before && trade.timestamp > options.before) continue;
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`Failed to fetch trades: ${response.statusText}`);
+      }
 
-      trades.push(trade);
+      const rawTrades = await response.json() as DataApiTrade[];
+
+      if (rawTrades.length === 0) break;
+
+      for (const raw of rawTrades) {
+        const trade = this.convertTrade(raw, marketId);
+
+        // Apply filters
+        if (options.after && trade.timestamp < options.after) continue;
+        if (options.before && trade.timestamp > options.before) continue;
+        if (options.outcome && trade.outcome !== options.outcome) continue;
+
+        allTrades.push(trade);
+      }
+
+      if (rawTrades.length < limit) break;
+      offset += limit;
     }
 
-    return trades;
+    return allTrades;
   }
 
-  private convertTrade(raw: RawTrade, marketId: string): Trade {
+  private convertTrade(raw: DataApiTrade, marketId: string): Trade {
     const size = parseFloat(raw.size);
     const price = parseFloat(raw.price);
 
     return {
-      id: raw.id,
+      id: raw.transactionHash,
       marketId,
-      wallet: raw.taker_address,
+      wallet: raw.proxyWallet,
       side: raw.side,
-      outcome: 'YES', // Will be determined by asset_id mapping
+      outcome: raw.outcome.toUpperCase() as 'YES' | 'NO',
       size,
       price,
-      timestamp: new Date(parseInt(raw.timestamp) * 1000),
+      timestamp: new Date(raw.timestamp),
       valueUsd: size * price,
     };
   }

@@ -1,36 +1,22 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
-
-const mockGetTrades = vi.fn();
-
-// Mock the ClobClient before any imports
-vi.mock('@polymarket/clob-client', () => ({
-  ClobClient: class {
-    getTrades = mockGetTrades;
-  },
-}));
-
-// Mock ethers Wallet
-vi.mock('ethers', () => ({
-  Wallet: class {
-    constructor() {}
-  },
-}));
-
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AccountFetcher } from '../../src/api/accounts.js';
 
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
+
 describe('AccountFetcher', () => {
-  beforeAll(() => {
-    process.env.POLY_PRIVATE_KEY = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-    process.env.POLY_API_KEY = 'test-key';
-    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ=';
-    process.env.POLY_PASSPHRASE = 'test-passphrase';
+  beforeEach(() => {
+    mockFetch.mockReset();
   });
 
   it('fetches account history', async () => {
-    mockGetTrades.mockResolvedValue([
-      { timestamp: '1704067200', size: '100', price: '0.5' },
-      { timestamp: '1705276800', size: '200', price: '0.3' },
-    ]);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([
+        { proxyWallet: '0xwallet', timestamp: 1704067200000, size: '100', price: '0.5' },
+        { proxyWallet: '0xwallet', timestamp: 1705276800000, size: '200', price: '0.3' },
+      ]),
+    });
 
     const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xwallet');
@@ -41,7 +27,10 @@ describe('AccountFetcher', () => {
   });
 
   it('handles accounts with no trades', async () => {
-    mockGetTrades.mockResolvedValue([]);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
 
     const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xnewbie');
@@ -52,10 +41,13 @@ describe('AccountFetcher', () => {
   });
 
   it('calculates first and last trade dates', async () => {
-    mockGetTrades.mockResolvedValue([
-      { timestamp: '1704067200', size: '100', price: '0.5' },
-      { timestamp: '1705276800', size: '200', price: '0.3' },
-    ]);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve([
+        { proxyWallet: '0xwallet', timestamp: 1704067200000, size: '100', price: '0.5' },
+        { proxyWallet: '0xwallet', timestamp: 1705276800000, size: '200', price: '0.3' },
+      ]),
+    });
 
     const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xwallet');
