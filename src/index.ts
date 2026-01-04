@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import 'dotenv/config';
 import { Command } from 'commander';
 import { loadConfig } from './config.js';
 import { AnalyzeCommand } from './commands/analyze.js';
