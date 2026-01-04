@@ -2,6 +2,7 @@ import type { Config } from '../config.js';
 import { PolymarketClient } from '../api/client.js';
 import { TradeFetcher } from '../api/trades.js';
 import { AccountFetcher } from '../api/accounts.js';
+import { createSubgraphClient } from '../api/subgraph.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
@@ -23,8 +24,15 @@ export class AnalyzeCommand {
 
   constructor(private config: Config) {
     this.client = new PolymarketClient();
-    this.tradeFetcher = new TradeFetcher();
-    this.accountFetcher = new AccountFetcher();
+
+    // Create subgraph client if API key is available
+    const subgraphClient = createSubgraphClient();
+    if (subgraphClient) {
+      console.log('Using The Graph subgraph as primary data source');
+    }
+
+    this.tradeFetcher = new TradeFetcher({ subgraphClient });
+    this.accountFetcher = new AccountFetcher({ subgraphClient });
     this.signals = [
       new TradeSizeSignal(),
       new AccountHistorySignal(),
@@ -34,11 +42,12 @@ export class AnalyzeCommand {
   }
 
   async execute(options: AnalyzeOptions): Promise<AnalysisReport> {
-    // 1. Fetch market metadata
+    // 1. Fetch market metadata (includes token IDs for subgraph queries)
     const market = await this.client.getMarket(options.marketId);
 
-    // 2. Fetch all trades
+    // 2. Fetch all trades (uses subgraph as primary if available)
     const allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
+      market, // Pass market for subgraph token IDs
       after: options.after,
       before: options.before,
       maxTrades: options.maxTrades,

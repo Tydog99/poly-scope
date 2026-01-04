@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TradeFetcher } from '../../src/api/trades.js';
 import type { TradeCache } from '../../src/api/cache.js';
+import type { SubgraphClient } from '../../src/api/subgraph.js';
+import type { Market } from '../../src/api/types.js';
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -12,22 +14,23 @@ vi.spyOn(console, 'log').mockImplementation(() => {});
 const TRADE_TIMESTAMP = 1705320000;
 
 // Create a mock cache
-const createMockCache = (): TradeCache => ({
-  load: vi.fn().mockReturnValue(null),
-  save: vi.fn(),
-  merge: vi.fn().mockImplementation((_marketId, trades) => ({
-    marketId: 'market-1',
-    newestTimestamp: TRADE_TIMESTAMP,
-    oldestTimestamp: TRADE_TIMESTAMP,
-    trades,
-  })),
-} as unknown as TradeCache);
+const createMockCache = (): TradeCache =>
+  ({
+    load: vi.fn().mockReturnValue(null),
+    save: vi.fn(),
+    merge: vi.fn().mockImplementation((_marketId, trades) => ({
+      marketId: 'market-1',
+      newestTimestamp: TRADE_TIMESTAMP,
+      oldestTimestamp: TRADE_TIMESTAMP,
+      trades,
+    })),
+  }) as unknown as TradeCache;
 
 const mockDataApiTrade = {
   proxyWallet: '0xtaker',
   side: 'BUY',
   size: 1000,
-  price: 0.50,
+  price: 0.5,
   timestamp: TRADE_TIMESTAMP,
   conditionId: 'market-1',
   outcome: 'Yes',
@@ -50,7 +53,7 @@ describe('TradeFetcher', () => {
       json: () => Promise.resolve([mockDataApiTrade]),
     });
 
-    const fetcher = new TradeFetcher(createMockCache());
+    const fetcher = new TradeFetcher({ cache: createMockCache() });
     const trades = await fetcher.getTradesForMarket('market-1');
 
     expect(trades).toHaveLength(1);
@@ -63,6 +66,7 @@ describe('TradeFetcher', () => {
     const noTrade = { ...mockDataApiTrade, transactionHash: '0xno', outcome: 'No' };
 
     const mockCache = createMockCache();
+    // Mock merge to convert Data API trades to our Trade format
     (mockCache.merge as ReturnType<typeof vi.fn>).mockImplementation((_marketId, trades) => ({
       marketId: 'market-1',
       newestTimestamp: TRADE_TIMESTAMP,
@@ -75,7 +79,7 @@ describe('TradeFetcher', () => {
       json: () => Promise.resolve([yesTrade, noTrade]),
     });
 
-    const fetcher = new TradeFetcher(mockCache);
+    const fetcher = new TradeFetcher({ cache: mockCache });
     const trades = await fetcher.getTradesForMarket('market-1', {
       outcome: 'YES',
     });
@@ -90,7 +94,7 @@ describe('TradeFetcher', () => {
       json: () => Promise.resolve([mockDataApiTrade]),
     });
 
-    const fetcher = new TradeFetcher(createMockCache());
+    const fetcher = new TradeFetcher({ cache: createMockCache() });
     const trades = await fetcher.getTradesForMarket('market-1');
     const trade = trades[0];
 
@@ -130,12 +134,120 @@ describe('TradeFetcher', () => {
       json: () => Promise.resolve([]),
     });
 
-    const fetcher = new TradeFetcher(mockCache);
+    const fetcher = new TradeFetcher({ cache: mockCache });
     // Set maxTrades to 1 so no backfill is attempted
     const trades = await fetcher.getTradesForMarket('market-1', { maxTrades: 1 });
 
     expect(trades).toHaveLength(1);
     expect(trades[0].id).toBe('0xcached');
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe('with subgraph', () => {
+    const mockMarket: Market = {
+      conditionId: '0xcondition1',
+      questionId: '0xquestion1',
+      question: 'Will X happen?',
+      outcomes: ['Yes', 'No'],
+      tokens: [
+        { tokenId: '0xyes_token', outcome: 'Yes' },
+        { tokenId: '0xno_token', outcome: 'No' },
+      ],
+      resolutionSource: 'https://example.com',
+      endDate: '2024-12-31',
+      resolved: false,
+    };
+
+    const mockSubgraphTrade = {
+      id: 'trade-1',
+      transactionHash: '0xsubgraph_tx',
+      timestamp: TRADE_TIMESTAMP,
+      maker: '0xmaker',
+      taker: '0xtaker',
+      marketId: '0xyes_token',
+      side: 'Buy' as const,
+      size: '1000000000', // 1000 in 6 decimals
+      price: '500000', // 0.5 in 6 decimals
+    };
+
+    it('uses subgraph as primary when available', async () => {
+      const mockSubgraphClient = {
+        getTradesByMarket: vi
+          .fn()
+          .mockResolvedValueOnce([mockSubgraphTrade]) // YES token
+          .mockResolvedValueOnce([]), // NO token (no trades)
+      } as unknown as SubgraphClient;
+
+      const mockCache = createMockCache();
+
+      const fetcher = new TradeFetcher({
+        cache: mockCache,
+        subgraphClient: mockSubgraphClient,
+      });
+
+      const trades = await fetcher.getTradesForMarket('0xcondition1', {
+        market: mockMarket,
+      });
+
+      expect(mockSubgraphClient.getTradesByMarket).toHaveBeenCalledTimes(2); // YES and NO tokens
+      expect(trades).toHaveLength(1);
+      expect(trades[0].id).toBe('0xsubgraph_tx');
+      expect(trades[0].wallet).toBe('0xtaker');
+      expect(trades[0].outcome).toBe('YES');
+      expect(trades[0].side).toBe('BUY');
+      expect(trades[0].size).toBe(1000);
+      expect(trades[0].price).toBe(0.5);
+      expect(trades[0].valueUsd).toBe(500);
+    });
+
+    it('falls back to Data API when subgraph fails', async () => {
+      const mockSubgraphClient = {
+        getTradesByMarket: vi.fn().mockRejectedValue(new Error('Subgraph timeout')),
+      } as unknown as SubgraphClient;
+
+      const mockCache = createMockCache();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockDataApiTrade]),
+      });
+
+      const fetcher = new TradeFetcher({
+        cache: mockCache,
+        subgraphClient: mockSubgraphClient,
+      });
+
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        market: mockMarket,
+      });
+
+      expect(trades).toHaveLength(1);
+      expect(trades[0].id).toBe('0xtx1'); // From Data API
+    });
+
+    it('falls back to Data API when no token IDs provided', async () => {
+      const mockSubgraphClient = {
+        getTradesByMarket: vi.fn(),
+      } as unknown as SubgraphClient;
+
+      const mockCache = createMockCache();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockDataApiTrade]),
+      });
+
+      const fetcher = new TradeFetcher({
+        cache: mockCache,
+        subgraphClient: mockSubgraphClient,
+      });
+
+      // No market passed = no token IDs
+      const trades = await fetcher.getTradesForMarket('market-1');
+
+      expect(mockSubgraphClient.getTradesByMarket).not.toHaveBeenCalled();
+      expect(trades).toHaveLength(1);
+      expect(trades[0].id).toBe('0xtx1'); // From Data API
+    });
   });
 });
