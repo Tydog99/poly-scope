@@ -1,9 +1,16 @@
 import type { Trade } from '../signals/types.js';
 import type { RawTrade, TradeHistoryResponse } from './types.js';
+import { loadCredentials, createL2Headers, type ApiCredentials } from './auth.js';
 
 const CLOB_HOST = 'https://clob.polymarket.com';
 
 export class TradeFetcher {
+  private creds: ApiCredentials;
+
+  constructor() {
+    this.creds = loadCredentials();
+  }
+
   async getTradesForMarket(
     marketId: string,
     options: {
@@ -20,9 +27,13 @@ export class TradeFetcher {
       url.searchParams.set('market', marketId);
       if (cursor) url.searchParams.set('next_cursor', cursor);
 
-      const response = await fetch(url.toString());
+      const path = url.pathname + url.search;
+      const headers = createL2Headers(this.creds, 'GET', path);
+
+      const response = await fetch(url.toString(), { headers });
       if (!response.ok) {
-        throw new Error(`Failed to fetch trades: ${response.statusText}`);
+        const body = await response.text();
+        throw new Error(`Failed to fetch trades: ${response.statusText} - ${body}`);
       }
 
       const data = await response.json() as TradeHistoryResponse;

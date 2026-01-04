@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { AccountFetcher } from '../../src/api/accounts.js';
 
 const mockFetch = vi.fn();
@@ -6,6 +6,14 @@ global.fetch = mockFetch;
 
 describe('AccountFetcher', () => {
   let fetcher: AccountFetcher;
+
+  beforeAll(() => {
+    // Set up mock credentials for tests
+    process.env.POLY_API_KEY = 'test-key';
+    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ='; // base64 "test-secret"
+    process.env.POLY_PASSPHRASE = 'test-passphrase';
+    process.env.POLY_WALLET = '0xtest';
+  });
 
   beforeEach(() => {
     fetcher = new AccountFetcher();

@@ -1,4 +1,5 @@
 import type { AccountHistory } from '../signals/types.js';
+import { loadCredentials, createL2Headers, type ApiCredentials } from './auth.js';
 
 const CLOB_HOST = 'https://clob.polymarket.com';
 
@@ -9,13 +10,23 @@ interface RawAccountTrade {
 }
 
 export class AccountFetcher {
+  private creds: ApiCredentials;
+
+  constructor() {
+    this.creds = loadCredentials();
+  }
+
   async getAccountHistory(wallet: string): Promise<AccountHistory> {
     const url = new URL(`${CLOB_HOST}/trades`);
     url.searchParams.set('maker_address', wallet);
 
-    const response = await fetch(url.toString());
+    const path = url.pathname + url.search;
+    const headers = createL2Headers(this.creds, 'GET', path);
+
+    const response = await fetch(url.toString(), { headers });
     if (!response.ok) {
-      throw new Error(`Failed to fetch account history: ${response.statusText}`);
+      const body = await response.text();
+      throw new Error(`Failed to fetch account history: ${response.statusText} - ${body}`);
     }
 
     const data = await response.json() as { data: RawAccountTrade[] };

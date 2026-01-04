@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { TradeFetcher } from '../../src/api/trades.js';
 import type { RawTrade } from '../../src/api/types.js';
 
@@ -20,6 +20,14 @@ const mockRawTrade: RawTrade = {
 
 describe('TradeFetcher', () => {
   let fetcher: TradeFetcher;
+
+  beforeAll(() => {
+    // Set up mock credentials for tests
+    process.env.POLY_API_KEY = 'test-key';
+    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ='; // base64 "test-secret"
+    process.env.POLY_PASSPHRASE = 'test-passphrase';
+    process.env.POLY_WALLET = '0xtest';
+  });
 
   beforeEach(() => {
     fetcher = new TradeFetcher();
