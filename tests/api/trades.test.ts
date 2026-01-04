@@ -1,9 +1,23 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { TradeFetcher } from '../../src/api/trades.js';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import type { RawTrade } from '../../src/api/types.js';
 
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+const mockGetTrades = vi.fn();
+
+// Mock the ClobClient before any imports
+vi.mock('@polymarket/clob-client', () => ({
+  ClobClient: class {
+    getTrades = mockGetTrades;
+  },
+}));
+
+// Mock ethers Wallet
+vi.mock('ethers', () => ({
+  Wallet: class {
+    constructor() {}
+  },
+}));
+
+import { TradeFetcher } from '../../src/api/trades.js';
 
 const mockRawTrade: RawTrade = {
   id: 'trade-1',
@@ -19,61 +33,40 @@ const mockRawTrade: RawTrade = {
 };
 
 describe('TradeFetcher', () => {
-  let fetcher: TradeFetcher;
-
   beforeAll(() => {
-    // Set up mock credentials for tests
+    process.env.POLY_PRIVATE_KEY = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     process.env.POLY_API_KEY = 'test-key';
-    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ='; // base64 "test-secret"
+    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ=';
     process.env.POLY_PASSPHRASE = 'test-passphrase';
-    process.env.POLY_WALLET = '0xtest';
-  });
-
-  beforeEach(() => {
-    fetcher = new TradeFetcher();
-    mockFetch.mockReset();
   });
 
   it('fetches trades for a market', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: [mockRawTrade] }),
-    });
-
+    mockGetTrades.mockResolvedValue([mockRawTrade]);
+    const fetcher = new TradeFetcher();
     const trades = await fetcher.getTradesForMarket('market-1');
 
     expect(trades).toHaveLength(1);
     expect(trades[0].id).toBe('trade-1');
-    expect(trades[0].valueUsd).toBe(500); // 1000 * 0.50
+    expect(trades[0].valueUsd).toBe(500);
   });
 
-  it('handles pagination', async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: [mockRawTrade],
-          next_cursor: 'cursor-1'
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: [{ ...mockRawTrade, id: 'trade-2' }]
-        }),
-      });
+  it('filters trades by date', async () => {
+    const oldTrade = { ...mockRawTrade, id: 'old', timestamp: '1704067200' };
+    const newTrade = { ...mockRawTrade, id: 'new', timestamp: '1705276800' };
+    mockGetTrades.mockResolvedValue([oldTrade, newTrade]);
 
-    const trades = await fetcher.getTradesForMarket('market-1');
+    const fetcher = new TradeFetcher();
+    const trades = await fetcher.getTradesForMarket('market-1', {
+      after: new Date('2024-01-10'),
+    });
 
-    expect(trades).toHaveLength(2);
+    expect(trades).toHaveLength(1);
+    expect(trades[0].id).toBe('new');
   });
 
   it('converts raw trade to Trade interface', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: [mockRawTrade] }),
-    });
-
+    mockGetTrades.mockResolvedValue([mockRawTrade]);
+    const fetcher = new TradeFetcher();
     const trades = await fetcher.getTradesForMarket('market-1');
     const trade = trades[0];
 

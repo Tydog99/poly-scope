@@ -1,49 +1,49 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
+
+const mockGetTrades = vi.fn();
+
+// Mock the ClobClient before any imports
+vi.mock('@polymarket/clob-client', () => ({
+  ClobClient: class {
+    getTrades = mockGetTrades;
+  },
+}));
+
+// Mock ethers Wallet
+vi.mock('ethers', () => ({
+  Wallet: class {
+    constructor() {}
+  },
+}));
+
 import { AccountFetcher } from '../../src/api/accounts.js';
 
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
-
 describe('AccountFetcher', () => {
-  let fetcher: AccountFetcher;
-
   beforeAll(() => {
-    // Set up mock credentials for tests
+    process.env.POLY_PRIVATE_KEY = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     process.env.POLY_API_KEY = 'test-key';
-    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ='; // base64 "test-secret"
+    process.env.POLY_API_SECRET = 'dGVzdC1zZWNyZXQ=';
     process.env.POLY_PASSPHRASE = 'test-passphrase';
-    process.env.POLY_WALLET = '0xtest';
-  });
-
-  beforeEach(() => {
-    fetcher = new AccountFetcher();
-    mockFetch.mockReset();
   });
 
   it('fetches account history', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: [
-          { timestamp: '1704067200', size: '100', price: '0.5' }, // Jan 1
-          { timestamp: '1705276800', size: '200', price: '0.3' }, // Jan 15
-        ],
-      }),
-    });
+    mockGetTrades.mockResolvedValue([
+      { timestamp: '1704067200', size: '100', price: '0.5' },
+      { timestamp: '1705276800', size: '200', price: '0.3' },
+    ]);
 
+    const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xwallet');
 
     expect(history.wallet).toBe('0xwallet');
     expect(history.totalTrades).toBe(2);
-    expect(history.totalVolumeUsd).toBe(110); // 100*0.5 + 200*0.3
+    expect(history.totalVolumeUsd).toBe(110);
   });
 
   it('handles accounts with no trades', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: [] }),
-    });
+    mockGetTrades.mockResolvedValue([]);
 
+    const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xnewbie');
 
     expect(history.totalTrades).toBe(0);
@@ -52,16 +52,12 @@ describe('AccountFetcher', () => {
   });
 
   it('calculates first and last trade dates', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: [
-          { timestamp: '1704067200', size: '100', price: '0.5' },
-          { timestamp: '1705276800', size: '200', price: '0.3' },
-        ],
-      }),
-    });
+    mockGetTrades.mockResolvedValue([
+      { timestamp: '1704067200', size: '100', price: '0.5' },
+      { timestamp: '1705276800', size: '200', price: '0.3' },
+    ]);
 
+    const fetcher = new AccountFetcher();
     const history = await fetcher.getAccountHistory('0xwallet');
 
     expect(history.firstTradeDate?.getTime()).toBe(1704067200000);

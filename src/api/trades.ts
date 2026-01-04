@@ -1,14 +1,33 @@
+import { ClobClient } from '@polymarket/clob-client';
+import { Wallet } from 'ethers';
 import type { Trade } from '../signals/types.js';
-import type { RawTrade, TradeHistoryResponse } from './types.js';
-import { loadCredentials, createL2Headers, type ApiCredentials } from './auth.js';
+import type { RawTrade } from './types.js';
 
 const CLOB_HOST = 'https://clob.polymarket.com';
+const CHAIN_ID = 137;
 
 export class TradeFetcher {
-  private creds: ApiCredentials;
+  private client: ClobClient;
 
   constructor() {
-    this.creds = loadCredentials();
+    const privateKey = process.env.POLY_PRIVATE_KEY;
+    const apiKey = process.env.POLY_API_KEY;
+    const secret = process.env.POLY_API_SECRET;
+    const passphrase = process.env.POLY_PASSPHRASE;
+
+    if (!privateKey || !apiKey || !secret || !passphrase) {
+      throw new Error(
+        'Missing credentials. Set POLY_PRIVATE_KEY, POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE.\n' +
+        'Run: npx tsx scripts/get-api-keys.ts --private-key 0x...'
+      );
+    }
+
+    const signer = new Wallet(privateKey);
+    this.client = new ClobClient(CLOB_HOST, CHAIN_ID, signer, {
+      key: apiKey,
+      secret,
+      passphrase,
+    });
   }
 
   async getTradesForMarket(
@@ -19,39 +38,20 @@ export class TradeFetcher {
       outcome?: 'YES' | 'NO';
     } = {}
   ): Promise<Trade[]> {
-    const allTrades: Trade[] = [];
-    let cursor: string | undefined;
+    const rawTrades = await this.client.getTrades({ market: marketId }) as unknown as RawTrade[];
 
-    do {
-      const url = new URL(`${CLOB_HOST}/trades`);
-      url.searchParams.set('market', marketId);
-      if (cursor) url.searchParams.set('next_cursor', cursor);
+    const trades: Trade[] = [];
+    for (const raw of rawTrades) {
+      const trade = this.convertTrade(raw, marketId);
 
-      const path = url.pathname + url.search;
-      const headers = createL2Headers(this.creds, 'GET', path);
+      // Apply filters
+      if (options.after && trade.timestamp < options.after) continue;
+      if (options.before && trade.timestamp > options.before) continue;
 
-      const response = await fetch(url.toString(), { headers });
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Failed to fetch trades: ${response.statusText} - ${body}`);
-      }
+      trades.push(trade);
+    }
 
-      const data = await response.json() as TradeHistoryResponse;
-
-      for (const raw of data.data) {
-        const trade = this.convertTrade(raw, marketId);
-
-        // Apply filters
-        if (options.after && trade.timestamp < options.after) continue;
-        if (options.before && trade.timestamp > options.before) continue;
-
-        allTrades.push(trade);
-      }
-
-      cursor = data.next_cursor;
-    } while (cursor);
-
-    return allTrades;
+    return trades;
   }
 
   private convertTrade(raw: RawTrade, marketId: string): Trade {

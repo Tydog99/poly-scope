@@ -1,7 +1,9 @@
+import { ClobClient } from '@polymarket/clob-client';
+import { Wallet } from 'ethers';
 import type { AccountHistory } from '../signals/types.js';
-import { loadCredentials, createL2Headers, type ApiCredentials } from './auth.js';
 
 const CLOB_HOST = 'https://clob.polymarket.com';
+const CHAIN_ID = 137;
 
 interface RawAccountTrade {
   timestamp: string;
@@ -10,27 +12,31 @@ interface RawAccountTrade {
 }
 
 export class AccountFetcher {
-  private creds: ApiCredentials;
+  private client: ClobClient;
 
   constructor() {
-    this.creds = loadCredentials();
+    const privateKey = process.env.POLY_PRIVATE_KEY;
+    const apiKey = process.env.POLY_API_KEY;
+    const secret = process.env.POLY_API_SECRET;
+    const passphrase = process.env.POLY_PASSPHRASE;
+
+    if (!privateKey || !apiKey || !secret || !passphrase) {
+      throw new Error(
+        'Missing credentials. Set POLY_PRIVATE_KEY, POLY_API_KEY, POLY_API_SECRET, and POLY_PASSPHRASE.\n' +
+        'Run: npx tsx scripts/get-api-keys.ts --private-key 0x...'
+      );
+    }
+
+    const signer = new Wallet(privateKey);
+    this.client = new ClobClient(CLOB_HOST, CHAIN_ID, signer, {
+      key: apiKey,
+      secret,
+      passphrase,
+    });
   }
 
   async getAccountHistory(wallet: string): Promise<AccountHistory> {
-    const url = new URL(`${CLOB_HOST}/trades`);
-    url.searchParams.set('maker_address', wallet);
-
-    const path = url.pathname + url.search;
-    const headers = createL2Headers(this.creds, 'GET', path);
-
-    const response = await fetch(url.toString(), { headers });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Failed to fetch account history: ${response.statusText} - ${body}`);
-    }
-
-    const data = await response.json() as { data: RawAccountTrade[] };
-    const trades = data.data;
+    const trades = await this.client.getTrades({ maker_address: wallet }) as unknown as RawAccountTrade[];
 
     if (trades.length === 0) {
       return {
