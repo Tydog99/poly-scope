@@ -29,6 +29,12 @@ npm run dev -- analyze -m <market> --outcome YES
 
 # Adjust alert threshold (default: 70)
 npm run dev -- analyze -m <market> --threshold 50
+
+# Investigate a specific wallet
+npm run dev -- investigate -w 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
+
+# Show more trades in investigation
+npm run dev -- investigate -w <wallet> --trades 50
 ```
 
 ## Caching
@@ -81,6 +87,108 @@ The CLOB API (`clob.polymarket.com/data/trades`) supports `before` and `after` t
 - Requires L2 authentication
 - Only returns the **authenticated user's own trades**, not all market trades
 
+## The Graph Subgraph API
+
+An alternative to the Polymarket Data API that queries on-chain data directly from Polygon.
+
+### Endpoint
+
+```
+https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC
+```
+
+Requires `Authorization: Bearer {API_KEY}` header. Get a free API key (100k queries/month) at [The Graph Studio](https://thegraph.com/studio/).
+
+### Key Entities
+
+| Entity | Description | Useful For |
+|--------|-------------|------------|
+| `Account` | Wallet with creation date, volume, trade count, profit | Account history signal |
+| `EnrichedOrderFilled` | Trade with maker/taker, side, size, price | Trade analysis |
+| `OrderFilledEvent` | Raw trade with asset IDs | Market matching |
+| `MarketPosition` | User positions per market | Position tracking |
+| `Condition` | Market conditions with resolution data | Market lookup |
+
+### Account Fields
+
+```graphql
+account(id: $walletAddress) {
+  id
+  creationTimestamp    # When account first traded
+  lastSeenTimestamp    # Most recent activity
+  collateralVolume     # Total USD volume (6 decimals)
+  numTrades            # Trade count
+  profit               # P&L in USD (6 decimals)
+}
+```
+
+### Trade Query (EnrichedOrderFilled)
+
+```graphql
+enrichedOrderFilleds(
+  where: { maker_: { id: $wallet } }  # or taker_
+  orderBy: timestamp
+  orderDirection: desc
+) {
+  timestamp
+  transactionHash
+  maker { id }
+  taker { id }
+  side          # "Buy" or "Sell"
+  size          # USD amount (6 decimals)
+  price         # Price (6 decimals)
+}
+```
+
+### Advantages Over Data API
+
+| Feature | Data API | Subgraph |
+|---------|----------|----------|
+| Historical depth | Capped (~10k-100k trades) | Full history |
+| Account creation date | Not available | ✓ Available |
+| Account profit/loss | Not available | ✓ Available |
+| Rate limits | Yes | 100k queries/month free |
+| Authentication | API keys for some endpoints | Bearer token |
+
+### Limitations
+
+- Some indexers may timeout on large queries
+- `market` field in `EnrichedOrderFilled` often returns undefined
+- Asset IDs are large decimal numbers (not hex condition IDs)
+- Query complexity limits apply
+
+### Environment Variable
+
+```bash
+THE_GRAPH_API_KEY=your_api_key_here
+```
+
+## Known Cases
+
+### Venezuela Market Insider Trading (Jan 2026)
+
+A suspicious trading pattern was identified on the Venezuela market:
+
+| Field | Value |
+|-------|-------|
+| **Wallet** | `0x31a56e9e690c621ed21de08cb559e9524cdb8ed9` |
+| **Profile** | [Polymarket Profile](https://polymarket.com/@0x31a56e9E690c621eD21De08Cb559e9524Cdb8eD9-1766730765984?tab=activity) |
+| **Account Created** | Dec 27, 2025 |
+| **Total Volume** | $404,357 |
+| **Profit/Loss** | -$28,076 |
+
+**Suspicious Trades:**
+- $6,000 Buy (Jan 2, 16:49 UTC)
+- $6,000 Buy (Jan 3, 01:38 UTC)
+- $7,000 Buy (Jan 3, 02:15 UTC)
+- $7,215 Buy (Jan 3, 02:58 UTC)
+
+**Red Flags:**
+- New account (created 6 days before trades)
+- Massive one-sided buying ($381K bought vs $22K sold)
+- Large round-number trades
+- Heavy position buildup followed by selling
+
 ## Signals
 
 The detector uses three weighted signals:
@@ -90,6 +198,17 @@ The detector uses three weighted signals:
 | Trade Size | 40% | Large trades relative to market |
 | Account History | 35% | New/dormant accounts score higher |
 | Conviction | 25% | Trades at extreme prices (near 0 or 1) |
+
+## Future Work
+
+Potential new signals that could improve detection accuracy:
+
+- **Cross-Market Correlation Signal** - Detect wallets that consistently bet the same direction across related markets (e.g., multiple Venezuela-related markets), or always trade right before resolution
+- **Position Concentration Signal** - Flag accounts with large positions concentrated in few markets vs. diversified across many
+- **Trade Timing Signal** - Identify trades clustered right before major price moves or market resolutions
+- **Whale Following Signal** - Detect accounts that consistently trade after known large accounts, suggesting information copying
+
+These signals would use position and trade pattern data from the subgraph to identify more sophisticated insider trading behaviors.
 
 ## License
 

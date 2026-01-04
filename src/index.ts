@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { Command } from 'commander';
 import { loadConfig } from './config.js';
 import { AnalyzeCommand } from './commands/analyze.js';
+import { InvestigateCommand } from './commands/investigate.js';
 import { CLIReporter } from './output/cli.js';
 import { SlugResolver } from './api/slug.js';
 
@@ -68,6 +69,32 @@ program
           console.log('\n' + '═'.repeat(60) + '\n');
         }
       }
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('investigate')
+  .description('Deep-dive investigation of a specific wallet')
+  .requiredOption('-w, --wallet <address>', 'Wallet address to investigate')
+  .option('--trades <number>', 'Number of recent trades to show (default: 20)', parseInt)
+  .option('--config <path>', 'Path to config file', './config.json')
+  .action(async (opts) => {
+    const config = loadConfig(opts.config);
+    const command = new InvestigateCommand(config);
+    const reporter = new CLIReporter();
+
+    try {
+      console.log(`Investigating wallet: ${opts.wallet}...\n`);
+
+      const report = await command.execute({
+        wallet: opts.wallet,
+        tradeLimit: opts.trades,
+      });
+
+      console.log(reporter.formatWalletReport(report));
     } catch (error) {
       console.error('Error:', error instanceof Error ? error.message : error);
       process.exit(1);
