@@ -26,3 +26,21 @@ export interface TradeHistoryResponse {
   data: RawTrade[];
   next_cursor?: string;
 }
+
+export interface GammaMarket {
+  id: string;
+  conditionId: string;
+  question: string;
+  outcomes: string[];
+  outcomePrices: string;
+  volume: string;
+  active: boolean;
+  closed: boolean;
+}
+
+export interface GammaEvent {
+  id: string;
+  slug: string;
+  title: string;
+  markets: GammaMarket[];
+}
