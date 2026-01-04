@@ -37,14 +37,27 @@ Trades are cached locally in `.cache/trades/` to avoid re-fetching on subsequent
 
 ## Polymarket Data API Limitations
 
-### 100,000 Trade Cap
+### Trade Cap (Varies by Market)
 
-The Polymarket Data API (`data-api.polymarket.com/trades`) has an undocumented limit of **100,000 trades per market**.
+The Polymarket Data API (`data-api.polymarket.com/trades`) has an undocumented trade limit that **varies by market**.
 
-**Evidence:**
-- Requesting offset 99998 returns trades: `0x9776b5...`, `0x3a11b9...`, `0x3d03e4...`
-- Requesting offset 100001 returns the **same trades**: `0x9776b5...`, `0x3a11b9...`, `0x3d03e4...`
-- The API wraps around and repeats data beyond offset ~100,000
+**Observed caps:**
+
+| Market | API Cap | Time Coverage | Market Active Since |
+|--------|---------|---------------|---------------------|
+| Maduro Jan 31 | ~100,000 trades | ~3 hours | ? |
+| Venezuela Invasion Jan 2026 | ~10,000 trades | ~13 hours | Dec 17 |
+
+**Wrap-around behavior:** When requesting offsets beyond the cap, the API returns duplicate trades instead of empty results.
+
+**Evidence (Maduro market):**
+- Requesting offset 99998 returns trades: `0x9776b5...`, `0x3a11b9...`
+- Requesting offset 100001 returns the **same trades**
+
+**Evidence (Venezuela market):**
+- Market has trading data since Dec 17 (visible on website chart)
+- API only returns ~10k trades covering Jan 3-4
+- Offsets beyond 10k wrap around to duplicate earlier results
 
 ### No Server-Side Date Filtering
 
@@ -60,13 +73,7 @@ The Data API does not support `before`, `after`, `start`, or `end` query paramet
 
 ### Implications
 
-For highly active markets, the 100k trade cap may only cover a few hours of activity. For example:
-
-| Market | Trades | Time Window |
-|--------|--------|-------------|
-| Maduro Jan 31 | 100,000 | ~3 hours |
-
-Historical trades beyond this window are **not accessible** via the Data API.
+Historical trades beyond the API cap are **not accessible** via the Data API. The cap appears to vary by market (possibly based on activity level or other factors).
 
 ### Alternative: CLOB API
 

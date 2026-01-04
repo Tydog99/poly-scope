@@ -27,14 +27,14 @@ export class TradeFetcher {
       after?: Date;
       before?: Date;
       outcome?: 'YES' | 'NO';
-      maxTrades?: number; // Limit initial fetch to this many trades
+      maxTrades?: number; // Target number of trades to have cached
     } = {}
   ): Promise<Trade[]> {
     // Load cached data
     const cached = this.cache.load(marketId);
-
-    // Fetch new trades (limit to maxTrades if no cache)
     const maxTrades = options.maxTrades ?? 10000; // Default 10k trades
+
+    // Step 1: Fetch new trades (newer than cache)
     const newTrades = await this.fetchNewTrades(
       marketId,
       cached?.newestTimestamp ?? 0,
@@ -43,16 +43,33 @@ export class TradeFetcher {
 
     // Merge new trades with cache
     let allTrades: Trade[];
+    let currentCount: number;
+
     if (newTrades.length > 0) {
       const merged = this.cache.merge(marketId, newTrades);
       allTrades = merged.trades;
-      console.log(`Fetched ${newTrades.length} new trades, total cached: ${allTrades.length}`);
+      currentCount = allTrades.length;
+      console.log(`Fetched ${newTrades.length} new trades, total cached: ${currentCount}`);
     } else if (cached) {
       allTrades = cached.trades;
-      console.log(`Using ${allTrades.length} cached trades (no new trades)`);
+      currentCount = allTrades.length;
+      console.log(`Using ${currentCount} cached trades (no new trades)`);
     } else {
       allTrades = [];
+      currentCount = 0;
       console.log('No trades found');
+    }
+
+    // Step 2: Backfill older trades if we haven't reached maxTrades
+    if (currentCount > 0 && currentCount < maxTrades) {
+      const needed = maxTrades - currentCount;
+      console.log(`Backfilling ${needed} older trades...`);
+      const olderTrades = await this.fetchOlderTrades(marketId, currentCount, needed);
+      if (olderTrades.length > 0) {
+        const merged = this.cache.merge(marketId, olderTrades);
+        allTrades = merged.trades;
+        console.log(`Fetched ${olderTrades.length} older trades, total cached: ${allTrades.length}`);
+      }
     }
 
     // Apply filters
@@ -116,6 +133,47 @@ export class TradeFetcher {
 
       offset += limit;
       console.log(`Fetching page ${offset / limit + 1}... (${trades.length} trades)`);
+    }
+
+    return trades;
+  }
+
+  private async fetchOlderTrades(
+    marketId: string,
+    startOffset: number,
+    maxTrades: number
+  ): Promise<Trade[]> {
+    const trades: Trade[] = [];
+    let offset = startOffset;
+    const limit = 500;
+
+    while (trades.length < maxTrades) {
+      const url = new URL(`${DATA_API}/trades`);
+      url.searchParams.set('market', marketId);
+      url.searchParams.set('limit', limit.toString());
+      url.searchParams.set('offset', offset.toString());
+
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        throw new Error(`Failed to fetch trades: ${response.statusText}`);
+      }
+
+      const rawTrades = await response.json() as DataApiTrade[];
+
+      if (rawTrades.length === 0) break;
+
+      for (const raw of rawTrades) {
+        trades.push(this.convertTrade(raw, marketId));
+        if (trades.length >= maxTrades) {
+          console.log(`Reached backfill limit (${maxTrades})`);
+          return trades;
+        }
+      }
+
+      if (rawTrades.length < limit) break;
+
+      offset += limit;
+      console.log(`Backfilling page ${Math.floor((offset - startOffset) / limit) + 1}... (${trades.length} older trades)`);
     }
 
     return trades;

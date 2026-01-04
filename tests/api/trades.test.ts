@@ -131,7 +131,8 @@ describe('TradeFetcher', () => {
     });
 
     const fetcher = new TradeFetcher(mockCache);
-    const trades = await fetcher.getTradesForMarket('market-1');
+    // Set maxTrades to 1 so no backfill is attempted
+    const trades = await fetcher.getTradesForMarket('market-1', { maxTrades: 1 });
 
     expect(trades).toHaveLength(1);
     expect(trades[0].id).toBe('0xcached');
