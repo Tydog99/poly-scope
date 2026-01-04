@@ -3,7 +3,7 @@
  * Generate Polymarket API credentials from your private key.
  *
  * Usage:
- *   PRIVATE_KEY=0x... npx tsx scripts/get-api-keys.ts
+ *   npx tsx scripts/get-api-keys.ts --private-key 0x...
  *
  * This will output your API credentials which you can save to .env
  */
@@ -14,13 +14,23 @@ import { Wallet } from 'ethers';
 const HOST = 'https://clob.polymarket.com';
 const CHAIN_ID = 137; // Polygon mainnet
 
+function parseArgs(): string | null {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--private-key' || args[i] === '-k') {
+      return args[i + 1] || null;
+    }
+  }
+  return null;
+}
+
 async function main() {
-  const privateKey = process.env.PRIVATE_KEY;
+  const privateKey = parseArgs();
 
   if (!privateKey) {
-    console.error('Error: PRIVATE_KEY environment variable is required');
+    console.error('Error: --private-key flag is required');
     console.log('\nUsage:');
-    console.log('  PRIVATE_KEY=0x... npx tsx scripts/get-api-keys.ts');
+    console.log('  npx tsx scripts/get-api-keys.ts --private-key 0x...');
     console.log('\nYour private key can be exported from MetaMask:');
     console.log('  1. Open MetaMask');
     console.log('  2. Click the three dots menu → Account Details');
