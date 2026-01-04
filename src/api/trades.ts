@@ -25,7 +25,7 @@ export class TradeFetcher {
         throw new Error(`Failed to fetch trades: ${response.statusText}`);
       }
 
-      const data: TradeHistoryResponse = await response.json();
+      const data = await response.json() as TradeHistoryResponse;
 
       for (const raw of data.data) {
         const trade = this.convertTrade(raw, marketId);

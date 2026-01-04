@@ -18,7 +18,7 @@ export class AccountFetcher {
       throw new Error(`Failed to fetch account history: ${response.statusText}`);
     }
 
-    const data: { data: RawAccountTrade[] } = await response.json();
+    const data = await response.json() as { data: RawAccountTrade[] };
     const trades = data.data;
 
     if (trades.length === 0) {
