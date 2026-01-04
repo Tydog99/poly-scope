@@ -48,11 +48,26 @@ async function main() {
     console.log('\nDeriving API credentials...');
     const creds = await client.createOrDeriveApiKey();
 
+    // Debug: show raw response structure
+    if (!creds.apiKey) {
+      console.log('\nRaw API response:', JSON.stringify(creds, null, 2));
+    }
+
+    // Handle both possible response structures
+    const apiKey = creds.apiKey || (creds as any).key;
+    const secret = creds.secret;
+    const passphrase = creds.passphrase;
+
+    if (!apiKey || !secret || !passphrase) {
+      console.error('\nUnexpected API response structure:', JSON.stringify(creds, null, 2));
+      process.exit(1);
+    }
+
     console.log('\n✓ API credentials generated!\n');
     console.log('Add these to your .env file:\n');
-    console.log(`POLY_API_KEY=${creds.apiKey}`);
-    console.log(`POLY_API_SECRET=${creds.secret}`);
-    console.log(`POLY_PASSPHRASE=${creds.passphrase}`);
+    console.log(`POLY_API_KEY=${apiKey}`);
+    console.log(`POLY_API_SECRET=${secret}`);
+    console.log(`POLY_PASSPHRASE=${passphrase}`);
     console.log(`POLY_WALLET=${signer.address}`);
 
     console.log('\n---');
