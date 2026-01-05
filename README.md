@@ -167,6 +167,48 @@ enrichedOrderFilleds(
 - Asset IDs are large decimal numbers (not hex condition IDs)
 - Query complexity limits apply
 
+### Account Entity Data Issues
+
+Some wallets have **corrupted `Account` entity data** where `numTrades=0` but `collateralVolume` shows massive volume (e.g., $8 billion). This is an indexer bug that affects a small percentage of accounts.
+
+**Example of broken data:**
+```json
+{
+  "numTrades": 0,
+  "collateralVolume": "8023932661385168"  // $8B volume but 0 trades?
+}
+```
+
+**Impact:** Without mitigation, these established whales would be flagged with 100/100 suspicion scores (appearing as "new accounts with no trades").
+
+### Fallback Strategy
+
+The tool implements a multi-tier data fetching strategy:
+
+```
+1. Try Subgraph Account Entity
+   ├─ Valid data → Use it
+   └─ Invalid (numTrades=0 but volume>0) → Query actual trades
+
+2. Query Actual Trades (for broken accounts)
+   └─ Count trades from enrichedOrderFilleds
+      ├─ maker trades + taker trades (deduplicated)
+      └─ Capped at 500 (500+ = established account)
+
+3. Fallback to Data API (if not in subgraph)
+   └─ Use Polymarket Data API for account history
+```
+
+**Batching:** Both Account queries and trade count queries are batched:
+- Account entities: 100 wallets per GraphQL request
+- Trade counts: 50 wallets per request (each needs maker + taker queries)
+
+**Data Source Tracking:** Each account history is tagged with its source:
+- `subgraph` - Valid Account entity data
+- `subgraph-trades` - Fixed via actual trade query
+- `data-api` - Polymarket Data API fallback
+- `cache` - Loaded from local cache
+
 ### Environment Variable
 
 ```bash
