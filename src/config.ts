@@ -27,6 +27,10 @@ export interface Config {
     earlyWindowHours: number;
     dumpImpactMin: number;
   };
+  filters: {
+    excludeSafeBets: boolean;
+    safeBetThreshold: number;
+  };
   subgraph: {
     enabled: boolean;
     timeout: number;
@@ -63,6 +67,10 @@ export const DEFAULT_CONFIG: Config = {
     earlyWindowHours: 48,
     dumpImpactMin: 5.0,
   },
+  filters: {
+    excludeSafeBets: true,
+    safeBetThreshold: 0.95,
+  },
   subgraph: {
     enabled: true,
     timeout: 30000,
@@ -88,6 +96,7 @@ export function loadConfig(path: string = './config.json'): Config {
     accountHistory: { ...DEFAULT_CONFIG.accountHistory, ...userConfig.accountHistory },
     conviction: { ...DEFAULT_CONFIG.conviction, ...userConfig.conviction },
     classification: { ...DEFAULT_CONFIG.classification, ...userConfig.classification },
+    filters: { ...DEFAULT_CONFIG.filters, ...userConfig.filters },
     subgraph: { ...DEFAULT_CONFIG.subgraph, ...userConfig.subgraph },
   };
 }

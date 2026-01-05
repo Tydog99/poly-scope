@@ -14,6 +14,7 @@ export interface AnalyzeOptions {
   before?: Date;
   outcome?: 'YES' | 'NO';
   maxTrades?: number;
+  topN?: number;
 }
 
 export class AnalyzeCommand {
@@ -90,6 +91,15 @@ export class AnalyzeCommand {
         console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
       }
 
+      // Filter out safe bets (high price buys)
+      if (
+        this.config.filters.excludeSafeBets &&
+        trade.side === 'BUY' &&
+        trade.price >= this.config.filters.safeBetThreshold
+      ) {
+        continue;
+      }
+
       // Quick score first (without account history)
       const quickContext: SignalContext = { config: this.config };
       const quickResults = await Promise.all(
@@ -143,7 +153,7 @@ export class AnalyzeCommand {
       market,
       totalTrades: allTrades.length,
       analyzedTrades: tradesToAnalyze.length,
-      suspiciousTrades: scoredTrades.slice(0, 10), // Top 10
+      suspiciousTrades: scoredTrades.slice(0, options.topN ?? 50),
       analyzedAt: new Date(),
     };
   }

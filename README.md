@@ -205,8 +205,16 @@ The CLI tool automatically classifies suspicious trades based on behavior:
 | `[DUMPING]` | SELL trade causing > 5% price drop | Yes (`dumpImpactMin`) |
 
 Configuration can be adjusted in `src/config.ts`.
-- Large round-number trades
-- Heavy position buildup followed by selling
+
+Configuration can be adjusted in `src/config.ts`.
+
+## Safe Bet Filtering
+
+The tool automatically filters out "Safe Whale" trades to reduce noise. These are defined as:
+- **Side**: BUY
+- **Price**: > $0.95 (Configurable via `safeBetThreshold`)
+
+These trades are typically yield farming (risking substantial capital for small % return on near-certain outcomes) and not indicative of insider information. You can disable this by setting `excludeSafeBets: false` in config.
 
 ## Signals
 
