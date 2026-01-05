@@ -173,22 +173,36 @@ export class SubgraphClient {
     const limit = options.limit || 100;
     const orderDirection = options.orderDirection || 'desc';
 
-    // Build time filters
-    const timeFilters: string[] = [];
+    // Build variables
+    const variables: Record<string, unknown> = {
+      wallet: normalizedWallet,
+      limit,
+    };
+
+    const where: Record<string, unknown> = {};
     if (options.after) {
-      timeFilters.push(`timestamp_gte: "${Math.floor(options.after.getTime() / 1000)}"`);
+      variables.after = Math.floor(options.after.getTime() / 1000).toString();
+      where.timestamp_gte = '$after';
     }
     if (options.before) {
-      timeFilters.push(`timestamp_lte: "${Math.floor(options.before.getTime() / 1000)}"`);
+      variables.before = Math.floor(options.before.getTime() / 1000).toString();
+      where.timestamp_lte = '$before';
     }
-    const timeFilter = timeFilters.length > 0 ? `, ${timeFilters.join(', ')}` : '';
+
+    // Helper to build where clause string with placeholders replaced by variables
+    const buildWhere = (baseWhere: string) => {
+      let clause = baseWhere;
+      if (variables.after) clause += `, timestamp_gte: $after`;
+      if (variables.before) clause += `, timestamp_lte: $before`;
+      return clause;
+    };
 
     // Query maker trades
     const makerResult = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-      query($wallet: String!, $limit: Int!) {
+      query($wallet: String!, $limit: Int!${variables.after ? ', $after: BigInt!' : ''}${variables.before ? ', $before: BigInt!' : ''}) {
         enrichedOrderFilleds(
           first: $limit,
-          where: { maker_: { id: $wallet }${timeFilter} }
+          where: { maker_: { id: $wallet }${buildWhere(' ')} }
           orderBy: timestamp
           orderDirection: ${orderDirection}
         ) {
@@ -203,14 +217,14 @@ export class SubgraphClient {
           price
         }
       }
-    `, { wallet: normalizedWallet, limit });
+    `, variables);
 
     // Query taker trades
     const takerResult = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-      query($wallet: String!, $limit: Int!) {
+      query($wallet: String!, $limit: Int!${variables.after ? ', $after: BigInt!' : ''}${variables.before ? ', $before: BigInt!' : ''}) {
         enrichedOrderFilleds(
           first: $limit,
-          where: { taker_: { id: $wallet }${timeFilter} }
+          where: { taker_: { id: $wallet }${buildWhere(' ')} }
           orderBy: timestamp
           orderDirection: ${orderDirection}
         ) {
@@ -225,7 +239,7 @@ export class SubgraphClient {
           price
         }
       }
-    `, { wallet: normalizedWallet, limit });
+    `, variables);
 
     // Combine and deduplicate
     const tradesMap = new Map<string, SubgraphTrade>();
@@ -259,26 +273,44 @@ export class SubgraphClient {
     const orderDirection = options.orderDirection || 'desc';
     const pageSize = 1000; // Subgraph max per request
 
-    // Build time filters
-    const timeFilters: string[] = [];
+    const allTrades: SubgraphTrade[] = [];
+    let lastTimestamp: string | null = null;
+    let lastId: string | null = null;
+
+    // Base variables for the query
+    const variables: Record<string, unknown> = {
+      marketId: marketId.toLowerCase(),
+      first: pageSize,
+    };
+
     if (options.after) {
-      timeFilters.push(`timestamp_gte: "${Math.floor(options.after.getTime() / 1000)}"`);
+      variables.after = Math.floor(options.after.getTime() / 1000).toString();
     }
     if (options.before) {
-      timeFilters.push(`timestamp_lte: "${Math.floor(options.before.getTime() / 1000)}"`);
+      variables.before = Math.floor(options.before.getTime() / 1000).toString();
     }
-    const timeFilter = timeFilters.length > 0 ? `, ${timeFilters.join(', ')}` : '';
-
-    const allTrades: SubgraphTrade[] = [];
-    let skip = 0;
 
     while (allTrades.length < maxTotal) {
+      // Build the 'where' clause dynamically
+      let whereClause = 'market: $marketId';
+      if (variables.after) whereClause += ', timestamp_gte: $after';
+      if (variables.before) whereClause += ', timestamp_lte: $before';
+
+      if (lastTimestamp) {
+        if (orderDirection === 'desc') {
+          variables.lastTimestamp = lastTimestamp;
+          whereClause += ', timestamp_lt: $lastTimestamp';
+        } else {
+          variables.lastTimestamp = lastTimestamp;
+          whereClause += ', timestamp_gt: $lastTimestamp';
+        }
+      }
+
       const result = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-        query($marketId: String!, $first: Int!, $skip: Int!) {
+        query($marketId: String!, $first: Int!${variables.after ? ', $after: BigInt!' : ''}${variables.before ? ', $before: BigInt!' : ''}${variables.lastTimestamp ? ', $lastTimestamp: BigInt!' : ''}) {
           enrichedOrderFilleds(
             first: $first,
-            skip: $skip,
-            where: { market: $marketId${timeFilter} }
+            where: { ${whereClause} }
             orderBy: timestamp
             orderDirection: ${orderDirection}
           ) {
@@ -293,19 +325,23 @@ export class SubgraphClient {
             price
           }
         }
-      `, { marketId: marketId.toLowerCase(), first: pageSize, skip });
+      `, variables);
 
       const trades = (result?.enrichedOrderFilleds || []).map((t) => this.mapTrade(t));
 
       if (trades.length === 0) break; // No more trades
 
       allTrades.push(...trades);
-      skip += pageSize;
+
+      // Update cursor for next page
+      const lastTrade = trades[trades.length - 1];
+      lastTimestamp = lastTrade.timestamp.toString();
+      lastId = lastTrade.id;
 
       if (trades.length < pageSize) break; // Last page
 
       // Log progress for large fetches
-      if (allTrades.length >= 1000 && allTrades.length % 2000 === 0) {
+      if (allTrades.length >= 1000 && allTrades.length % pageSize === 0) {
         console.log(`  Fetched ${allTrades.length} trades from subgraph...`);
       }
     }

@@ -242,8 +242,10 @@ describe('SubgraphClient', () => {
       await client.getTradesByMarket('0xtoken', { after, before });
 
       const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(callBody.query).toContain('timestamp_gte');
-      expect(callBody.query).toContain('timestamp_lte');
+      expect(callBody.variables).toHaveProperty('after', Math.floor(after.getTime() / 1000).toString());
+      expect(callBody.variables).toHaveProperty('before', Math.floor(before.getTime() / 1000).toString());
+      expect(callBody.query).toContain('$after');
+      expect(callBody.query).toContain('$before');
     });
   });
 
@@ -348,6 +350,56 @@ describe('SubgraphClient', () => {
       await expect(client.getAccount('0xwallet')).rejects.toThrow(
         'Invalid query syntax'
       );
+    });
+  });
+
+  describe('getTradesByMarket pagination', () => {
+    it('fetches multiple pages using cursor (timestamp_lt)', async () => {
+      // Page 1: 1000 trades, last trade at timestamp 1700000001
+      const page1 = Array.from({ length: 1000 }, (_, i) => ({
+        id: `t1-${i}`,
+        transactionHash: `tx1-${i}`,
+        timestamp: (1700001000 - i).toString(),
+        maker: { id: 'm' },
+        taker: { id: 't' },
+        market: { id: 'm1' },
+        side: 'Buy',
+        size: '100',
+        price: '0.5'
+      }));
+
+      // Page 2: 500 trades
+      const page2 = Array.from({ length: 500 }, (_, i) => ({
+        id: `t2-${i}`,
+        transactionHash: `tx2-${i}`,
+        timestamp: (1700000000 - i - 1).toString(),
+        maker: { id: 'm' },
+        taker: { id: 't' },
+        market: { id: 'm1' },
+        side: 'Buy',
+        size: '100',
+        price: '0.5'
+      }));
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: { enrichedOrderFilleds: page1 } }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: { enrichedOrderFilleds: page2 } }),
+        });
+
+      const trades = await client.getTradesByMarket('m1', { limit: 2000 });
+
+      expect(trades).toHaveLength(1500);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Check second call parameters
+      const secondCallBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+      expect(secondCallBody.variables).toHaveProperty('lastTimestamp', '1700000001');
+      expect(secondCallBody.query).toContain('timestamp_lt: $lastTimestamp');
     });
   });
 });

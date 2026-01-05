@@ -15,7 +15,7 @@ npm run build
 # Analyze a market by slug
 npm run dev -- analyze -m maduro-out-in-2025
 
-# Analyze by condition ID
+# Analyze by specific market ID
 npm run dev -- analyze -m 0x580adc1327de9bf7c179ef5aaffa3377bb5cb252b7d6390b027172d43fd6f993
 
 # Limit trades fetched (default: 10,000)
