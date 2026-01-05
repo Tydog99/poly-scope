@@ -8,7 +8,18 @@ export class AccountHistorySignal implements Signal {
     const { config, accountHistory } = context;
     const { maxLifetimeTrades, maxAccountAgeDays, minDormancyDays } = config.accountHistory;
 
-    // No history = maximum suspicion
+    // If account history was skipped due to budget, return neutral score (50)
+    // rather than defaulting to maximum suspicion.
+    if (accountHistory === undefined) {
+      return {
+        name: this.name,
+        score: 50,
+        weight: this.weight,
+        details: { reason: 'skipped_budget' },
+      };
+    }
+
+    // No history found = maximum suspicion (new account)
     if (!accountHistory || !accountHistory.firstTradeDate) {
       return {
         name: this.name,
@@ -28,9 +39,9 @@ export class AccountHistorySignal implements Signal {
 
     const dormancyDays = accountHistory.lastTradeDate
       ? Math.floor(
-          (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) /
-            (1000 * 60 * 60 * 24)
-        )
+        (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) /
+        (1000 * 60 * 60 * 24)
+      )
       : 0;
 
     // Calculate component scores
@@ -58,6 +69,18 @@ export class AccountHistorySignal implements Signal {
       tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades, 33);
       ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 33);
       dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 34);
+
+      // Even without profit, high volume on a very new account is suspicious.
+      // If < 30 days old and > $10k volume, add volume bonus (caps at 25)
+      if (accountAgeDays <= 30 && accountHistory.totalVolumeUsd > 10000) {
+        const volumeBonus = Math.min(25, (accountHistory.totalVolumeUsd / 20000) * 25);
+        // Normalize the 3-component total to fit with the bonus
+        // Or just let it exceed slightly and cap at 100
+        tradeCountScore = (tradeCountScore * 75) / 100;
+        ageScore = (ageScore * 75) / 100;
+        dormancyScore = (dormancyScore * 75) / 100;
+        profitScore = volumeBonus;
+      }
     }
 
     const totalScore = Math.round(tradeCountScore + ageScore + dormancyScore + profitScore);

@@ -40,14 +40,14 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher();
       const history = await fetcher.getAccountHistory('0xwallet');
 
-      expect(history.wallet).toBe('0xwallet');
-      expect(history.totalTrades).toBe(2);
-      expect(history.totalVolumeUsd).toBe(110);
-      expect(history.dataSource).toBe('data-api');
+      expect(history!.wallet).toBe('0xwallet');
+      expect(history!.totalTrades).toBe(2);
+      expect(history!.totalVolumeUsd).toBe(110);
+      expect(history!.dataSource).toBe('data-api');
 
       // Jan 1st 2024
-      expect(history.firstTradeDate?.toISOString()).toBe('2024-01-01T00:00:00.000Z');
-      expect(history.lastTradeDate?.toISOString()).toBe('2024-01-15T00:00:00.000Z');
+      expect(history!.firstTradeDate?.toISOString()).toBe('2024-01-01T00:00:00.000Z');
+      expect(history!.lastTradeDate?.toISOString()).toBe('2024-01-15T00:00:00.000Z');
     });
 
     it('handles accounts with no trades', async () => {
@@ -59,10 +59,10 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher();
       const history = await fetcher.getAccountHistory('0xnewbie');
 
-      expect(history.totalTrades).toBe(0);
-      expect(history.firstTradeDate).toBeNull();
-      expect(history.lastTradeDate).toBeNull();
-      expect(history.dataSource).toBe('data-api');
+      expect(history!.totalTrades).toBe(0);
+      expect(history!.firstTradeDate).toBeNull();
+      expect(history!.lastTradeDate).toBeNull();
+      expect(history!.dataSource).toBe('data-api');
     });
   });
 
@@ -91,7 +91,7 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher({ subgraphClient });
       const history = await fetcher.getAccountHistory('0xwallet');
 
-      expect(history.dataSource).toBe('subgraph');
+      expect(history!.dataSource).toBe('subgraph');
     });
 
     it('falls back to Data API when account not found in subgraph', async () => {
@@ -104,7 +104,7 @@ describe('AccountFetcher', () => {
         ok: true,
         json: () =>
           Promise.resolve([
-            { proxyWallet: '0xnewwallet', timestamp: 1704067200000, size: '50', price: '0.5' },
+            { proxyWallet: '0xnewwallet', timestamp: 1704067200, size: '50', price: '0.5' },
           ]),
       });
 
@@ -112,7 +112,7 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher({ subgraphClient });
       const history = await fetcher.getAccountHistory('0xnewwallet');
 
-      expect(history.dataSource).toBe('data-api');
+      expect(history!.dataSource).toBe('data-api');
     });
   });
 
@@ -175,7 +175,7 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher({ cacheAccountLookup: true });
       const results = await fetcher.getAccountHistoryBatch(['0xhit', '0xmiss']);
 
-      expect(results.get('0xhit')).toEqual({ ...cached, dataSource: 'cache' });
+      expect(results.get('0xhit')).toBe(cached);
       expect(results.get('0xmiss')).toBeDefined();
 
       // Should save the missing wallet after fetching

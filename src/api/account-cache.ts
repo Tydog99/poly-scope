@@ -15,6 +15,10 @@ export class AccountCache {
         return join(this.cacheDir, `${wallet.toLowerCase()}.json`);
     }
 
+    has(wallet: string): boolean {
+        return existsSync(this.getCachePath(wallet));
+    }
+
     load(wallet: string): AccountHistory | null {
         const cachePath = this.getCachePath(wallet);
 

@@ -28,15 +28,29 @@ export class AccountFetcher {
   }
 
   /**
+   * Check if history is already in cache
+   */
+  isCached(wallet: string): boolean {
+    return this.useCache && this.cache.has(wallet);
+  }
+
+  /**
    * Get account history, preferring subgraph data when available
    */
-  async getAccountHistory(wallet: string): Promise<AccountHistory> {
+  async getAccountHistory(
+    wallet: string,
+    options: { skipNetwork?: boolean } = {}
+  ): Promise<AccountHistory | null> {
     // Check cache first if enabled
     if (this.useCache) {
       const cached = this.cache.load(wallet);
       if (cached) {
         return { ...cached, dataSource: 'cache' };
       }
+    }
+
+    if (options.skipNetwork) {
+      return null;
     }
 
     let history: AccountHistory;

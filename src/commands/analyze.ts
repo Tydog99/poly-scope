@@ -117,12 +117,24 @@ export class AnalyzeCommand {
 
       // Only fetch account history for high-scoring trades (limit API calls)
       let accountHistory;
-      if (quickScore.total > 60 && accountFetches < 50) {
-        accountHistory = await this.accountFetcher.getAccountHistory(trade.wallet);
-        if (accountHistory.dataSource === 'cache') {
-          cacheHits++;
-        } else {
-          accountFetches++;
+      if (quickScore.total > 60) {
+        // Try to get. If it's a cache hit, we always take it.
+        // If it's a cache miss, we only fetch if we are under the network budget.
+        const isCached = this.accountFetcher.isCached(trade.wallet);
+
+        if (isCached || accountFetches < 50) {
+          const result = await this.accountFetcher.getAccountHistory(trade.wallet, {
+            skipNetwork: !isCached && accountFetches >= 50
+          });
+
+          if (result) {
+            accountHistory = result;
+            if (result.dataSource !== 'cache') {
+              accountFetches++;
+            } else {
+              cacheHits++;
+            }
+          }
         }
       }
 
