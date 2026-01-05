@@ -179,14 +179,11 @@ export class SubgraphClient {
       limit,
     };
 
-    const where: Record<string, unknown> = {};
     if (options.after) {
       variables.after = Math.floor(options.after.getTime() / 1000).toString();
-      where.timestamp_gte = '$after';
     }
     if (options.before) {
       variables.before = Math.floor(options.before.getTime() / 1000).toString();
-      where.timestamp_lte = '$before';
     }
 
     // Helper to build where clause string with placeholders replaced by variables
@@ -341,7 +338,7 @@ export class SubgraphClient {
       if (trades.length < pageSize) break; // Last page
 
       // Log progress for large fetches
-      if (allTrades.length >= 1000 && allTrades.length % pageSize === 0) {
+      if (allTrades.length >= 1000 && allTrades.length % 2000 === 0) {
         console.log(`  Fetched ${allTrades.length} trades from subgraph...`);
       }
     }
