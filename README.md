@@ -30,6 +30,9 @@ npm run dev -- analyze -m <market> --outcome YES
 # Adjust alert threshold (default: 70)
 npm run dev -- analyze -m <market> --threshold 50
 
+# Limit results shown (default: 50)
+npm run dev -- analyze -m <market> --top 10
+
 # Investigate a specific wallet
 npm run dev -- investigate -w 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
 
@@ -206,8 +209,6 @@ The CLI tool automatically classifies suspicious trades based on behavior:
 | `[SNIPER]` | Score > 80 AND Impact > 2% AND Size < $25k | Yes (`sniper*`) |
 | `[EARLY MOVER]`| Trading within first 48h of market creation | Yes (`earlyWindowHours`) |
 | `[DUMPING]` | SELL trade causing > 5% price drop | Yes (`dumpImpactMin`) |
-
-Configuration can be adjusted in `src/config.ts`.
 
 Configuration can be adjusted in `src/config.ts`.
 
