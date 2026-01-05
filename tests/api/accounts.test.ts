@@ -32,8 +32,8 @@ describe('AccountFetcher', () => {
         ok: true,
         json: () =>
           Promise.resolve([
-            { proxyWallet: '0xwallet', timestamp: 1704067200000, size: '100', price: '0.5' },
-            { proxyWallet: '0xwallet', timestamp: 1705276800000, size: '200', price: '0.3' },
+            { proxyWallet: '0xwallet', timestamp: 1704067200, size: '100', price: '0.5' },
+            { proxyWallet: '0xwallet', timestamp: 1705276800, size: '200', price: '0.3' },
           ]),
       });
 
@@ -44,6 +44,10 @@ describe('AccountFetcher', () => {
       expect(history.totalTrades).toBe(2);
       expect(history.totalVolumeUsd).toBe(110);
       expect(history.dataSource).toBe('data-api');
+
+      // Jan 1st 2024
+      expect(history.firstTradeDate?.toISOString()).toBe('2024-01-01T00:00:00.000Z');
+      expect(history.lastTradeDate?.toISOString()).toBe('2024-01-15T00:00:00.000Z');
     });
 
     it('handles accounts with no trades', async () => {

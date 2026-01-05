@@ -204,8 +204,8 @@ export class AccountFetcher {
     return {
       wallet,
       totalTrades: trades.length,
-      firstTradeDate: new Date(Math.min(...timestamps)),
-      lastTradeDate: new Date(Math.max(...timestamps)),
+      firstTradeDate: new Date(Math.min(...timestamps) * 1000),
+      lastTradeDate: new Date(Math.max(...timestamps) * 1000),
       totalVolumeUsd: volumes.reduce((sum, v) => sum + v, 0),
       dataSource: 'data-api',
     };
