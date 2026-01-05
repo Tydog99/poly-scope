@@ -56,8 +56,14 @@ describe('CLIReporter', () => {
   });
 
   it('truncates wallet addresses', () => {
-    const truncated = reporter.truncateWallet('0x1234567890abcdef');
+    const truncated = reporter.truncateWallet('0x1234567890abcdef', false);
     expect(truncated).toBe('0x1234...ef');
+  });
+
+  it('adds OSC 8 hyperlink when linkable', () => {
+    const linked = reporter.truncateWallet('0x1234567890abcdef', true);
+    expect(linked).toContain('0x1234...ef');
+    expect(linked).toContain('0x1234567890abcdef'); // Full address in link
   });
 
   it('formats USD values', () => {

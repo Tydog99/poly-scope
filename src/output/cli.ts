@@ -57,28 +57,29 @@ export class CLIReporter {
       chalk.bold('Size'),
       chalk.bold('Acct'),
       chalk.bold('Conv'),
+      chalk.bold('Time'.padEnd(15)),
       chalk.bold('Wallet'),
       chalk.bold('Trade'),
       chalk.bold('Tags'),
     ].join('  ');
     lines.push(header);
-    lines.push(chalk.gray('─'.repeat(105)));
+    lines.push(chalk.gray('─'.repeat(120)));
 
     report.suspiciousTrades.forEach((st, idx) => {
       lines.push(this.formatSuspiciousTradeRow(st, idx + 1, walletStats));
     });
 
-    // Add wallet summary footer
+    // Add wallet summary footer with full addresses for easy copying
     const repeatWallets = this.getRepeatWalletsSummary(walletStats);
     if (repeatWallets.length > 0) {
       lines.push('');
-      lines.push(chalk.gray('─'.repeat(105)));
+      lines.push(chalk.gray('─'.repeat(120)));
       lines.push('');
       lines.push(chalk.bold('Repeat Wallets (investigate these):'));
       repeatWallets.forEach(({ wallet, stats }, idx) => {
         const arrow = idx === 0 ? chalk.red(' ← top suspect') : '';
         lines.push(
-          `  ${stats.color(this.truncateWallet(wallet).padEnd(12))}  ` +
+          `  ${stats.color(wallet)}  ` +
           `${String(stats.count).padStart(2)} trades  ` +
           `${this.formatUsd(stats.totalVolume).padStart(12)} total` +
           arrow
@@ -157,12 +158,22 @@ export class CLIReporter {
       String(sizeScore).padStart(3) + '/100',
       String(acctScore).padStart(3) + '/100',
       String(convScore).padStart(3) + '/100',
+      chalk.gray(this.formatTime(st.trade.timestamp)),
       walletColor(this.truncateWallet(st.trade.wallet).padEnd(12)),
       `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
       tags,
     ];
 
     return cols.join('  ');
+  }
+
+  private formatTime(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   private formatSuspiciousTrade(st: SuspiciousTrade, rank: number): string {
@@ -215,9 +226,16 @@ export class CLIReporter {
     return abbrevs[name] || name;
   }
 
-  truncateWallet(wallet: string): string {
+  truncateWallet(wallet: string, linkable = true): string {
     if (wallet.length <= 10) return wallet;
-    return `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
+    const truncated = `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
+
+    if (linkable) {
+      // OSC 8 terminal hyperlink - displays truncated but copies full address
+      // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
+      return `\x1b]8;;${wallet}\x07${truncated}\x1b]8;;\x07`;
+    }
+    return truncated;
   }
 
   formatUsd(value: number): string {
