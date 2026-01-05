@@ -24,6 +24,7 @@ export class CLIReporter {
     }
 
     lines.push(chalk.bold.red('Top Suspicious Trades:'));
+    lines.push(chalk.gray('Weights: Size 40% | Acct 35% | Conv 25%'));
     lines.push(chalk.gray('━'.repeat(50)));
 
     report.suspiciousTrades.forEach((st, idx) => {
@@ -39,6 +40,25 @@ export class CLIReporter {
     const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
 
     lines.push(`#${rank}  Score: ${scoreColor.bold(`${st.score.total}/100`)}`);
+
+    // Score breakdown by signal
+    const breakdown = st.score.signals
+      .map((s) => `${this.getSignalAbbrev(s.name)}:${s.score}/100`)
+      .join(' | ');
+    lines.push(`    ${chalk.gray(breakdown)}`);
+
+    // Classifications
+    if (st.classifications && st.classifications.length > 0) {
+      const badges = st.classifications.map(c => {
+        if (c === 'WHALE') return chalk.bgBlue.white(' WHALE ');
+        if (c === 'SNIPER') return chalk.bgRed.white(' SNIPER ');
+        if (c === 'EARLY_MOVER') return chalk.bgGreen.black(' EARLY MOVER ');
+        if (c === 'DUMPING') return chalk.bgRed.white(' DUMPING ');
+        return chalk.bgGray.white(` ${c} `);
+      }).join(' ');
+      lines.push(`    ${badges}`);
+    }
+
     lines.push(`    Wallet: ${chalk.cyan(this.truncateWallet(st.trade.wallet))}`);
     lines.push(`    Trade: ${this.formatUsd(st.trade.valueUsd)} ${st.trade.outcome} @ ${st.trade.price.toFixed(2)}`);
 
@@ -54,6 +74,15 @@ export class CLIReporter {
     }
 
     return lines.join('\n');
+  }
+
+  private getSignalAbbrev(name: string): string {
+    const abbrevs: Record<string, string> = {
+      tradeSize: 'Size',
+      accountHistory: 'Acct',
+      conviction: 'Conv',
+    };
+    return abbrevs[name] || name;
   }
 
   truncateWallet(wallet: string): string {
@@ -143,7 +172,7 @@ export class CLIReporter {
       lines.push(chalk.bold(`Recent Trades (${report.recentTrades.length}):`));
       for (const trade of report.recentTrades.slice(0, 10)) {
         const size = parseFloat(trade.size) / 1e6;
-        const price = parseFloat(trade.price) / 1e6;
+        const price = parseFloat(trade.price);
         const value = size * price;
         const date = new Date(trade.timestamp * 1000);
         const sideColor = trade.side === 'Buy' ? chalk.green : chalk.red;

@@ -4,6 +4,7 @@ import { TradeFetcher } from '../api/trades.js';
 import { AccountFetcher } from '../api/accounts.js';
 import { createSubgraphClient } from '../api/subgraph.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
+import { TradeClassifier } from '../signals/classifier.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
 
@@ -21,6 +22,7 @@ export class AnalyzeCommand {
   private accountFetcher: AccountFetcher;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
+  private classifier: TradeClassifier;
 
   constructor(private config: Config) {
     this.client = new PolymarketClient();
@@ -45,6 +47,7 @@ export class AnalyzeCommand {
       new ConvictionSignal(),
     ];
     this.aggregator = new SignalAggregator(config);
+    this.classifier = new TradeClassifier();
   }
 
   async execute(options: AnalyzeOptions): Promise<AnalysisReport> {
@@ -112,11 +115,22 @@ export class AnalyzeCommand {
       const finalScore = this.aggregator.aggregate(fullResults);
 
       if (finalScore.isAlert) {
-        scoredTrades.push({
+        const suspiciousTrade: SuspiciousTrade = {
           trade,
           score: finalScore,
           accountHistory,
-        });
+          // Calculate impact for classification context
+          priceImpact: (fullResults[0].details as any)?.impactPercent ? {
+            before: 0, // Not used by classifier currently
+            after: 0,
+            changePercent: (fullResults[0].details as any).impactPercent
+          } : undefined
+        };
+
+        const classifications = this.classifier.classify(suspiciousTrade, finalScore, market.createdAt ? new Date(market.createdAt) : undefined);
+        suspiciousTrade.classifications = classifications;
+
+        scoredTrades.push(suspiciousTrade);
       }
     }
 

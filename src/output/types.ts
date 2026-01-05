@@ -10,6 +10,7 @@ export interface SuspiciousTrade {
     after: number;
     changePercent: number;
   };
+  classifications?: string[];
 }
 
 export interface AnalysisReport {
