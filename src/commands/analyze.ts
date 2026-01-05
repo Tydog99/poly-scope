@@ -81,22 +81,24 @@ export class AnalyzeCommand {
       tradesToAnalyze = allTrades;
     }
 
-    // 4. Score each trade
-    const scoredTrades: SuspiciousTrade[] = [];
-    let processed = 0;
-    let accountFetches = 0;
-    let cacheHits = 0;
+    // === PHASE 1: Quick score all trades, collect candidate wallets ===
+    console.log(`Phase 1: Quick scoring ${tradesToAnalyze.length} trades...`);
 
-    console.log(`Scoring ${tradesToAnalyze.length} trades...`);
+    interface QuickScoreResult {
+      trade: Trade;
+      quickScore: number;
+      quickResults: import('../signals/types.js').SignalResult[];
+    }
 
-    for (const trade of tradesToAnalyze) {
-      processed++;
-      if (processed % 100 === 0) {
-        if (this.config.subgraph.cacheAccountLookup) {
-          console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} lookups, ${cacheHits} cached)`);
-        } else {
-          console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
-        }
+    const quickScores: QuickScoreResult[] = [];
+    const candidateWallets = new Set<string>();
+    let safeBetsFiltered = 0;
+
+    for (let i = 0; i < tradesToAnalyze.length; i++) {
+      const trade = tradesToAnalyze[i];
+
+      if ((i + 1) % 500 === 0) {
+        console.log(`  Quick scored ${i + 1}/${tradesToAnalyze.length}`);
       }
 
       // Filter out safe bets (high price buys/sells on resolved markets)
@@ -105,38 +107,55 @@ export class AnalyzeCommand {
         trade.price >= this.config.filters.safeBetThreshold &&
         (trade.side === 'BUY' || trade.side === 'SELL')
       ) {
+        safeBetsFiltered++;
         continue;
       }
 
-      // Quick score first (without account history)
+      // Quick score (without account history)
       const quickContext: SignalContext = { config: this.config };
       const quickResults = await Promise.all(
         this.signals.map(s => s.calculate(trade, quickContext))
       );
       const quickScore = this.aggregator.aggregate(quickResults);
 
-      // Only fetch account history for high-scoring trades (limit API calls)
-      let accountHistory;
+      quickScores.push({ trade, quickScore: quickScore.total, quickResults });
+
+      // Collect wallets from trades that might be suspicious
       if (quickScore.total > 60) {
-        // Try to get. If it's a cache hit, we always take it.
-        // If it's a cache miss, we only fetch if we are under the network budget.
-        const isCached = this.accountFetcher.isCached(trade.wallet);
-
-        if (isCached || accountFetches < 50) {
-          const result = await this.accountFetcher.getAccountHistory(trade.wallet, {
-            skipNetwork: !isCached && accountFetches >= 50
-          });
-
-          if (result) {
-            accountHistory = result;
-            if (result.dataSource !== 'cache') {
-              accountFetches++;
-            } else {
-              cacheHits++;
-            }
-          }
-        }
+        candidateWallets.add(trade.wallet.toLowerCase());
       }
+    }
+
+    console.log(`  Found ${candidateWallets.size} unique candidate wallets (${safeBetsFiltered} safe bets filtered)`);
+
+    // === PHASE 2: Batch fetch all candidate account histories ===
+    console.log(`Phase 2: Fetching account histories for ${candidateWallets.size} wallets...`);
+
+    const accountHistories = await this.accountFetcher.getAccountHistoryBatch(
+      [...candidateWallets]
+    );
+
+    const cacheHits = [...accountHistories.values()].filter(h => h.dataSource === 'cache').length;
+    const subgraphHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph').length;
+    const subgraphTradesHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph-trades').length;
+    const apiHits = [...accountHistories.values()].filter(h => h.dataSource === 'data-api').length;
+
+    console.log(`  Fetched ${accountHistories.size} accounts (${cacheHits} cached, ${subgraphHits} subgraph, ${subgraphTradesHits} fixed, ${apiHits} API)`);
+
+    // === PHASE 3: Final scoring with account data ===
+    console.log(`Phase 3: Final scoring with account histories...`);
+
+    const scoredTrades: SuspiciousTrade[] = [];
+
+    for (let i = 0; i < quickScores.length; i++) {
+      const { trade, quickScore, quickResults } = quickScores[i];
+
+      if ((i + 1) % 500 === 0) {
+        console.log(`  Final scored ${i + 1}/${quickScores.length}`);
+      }
+
+      // Get account history if we fetched it (for high-scoring trades)
+      const accountHistory = accountHistories.get(trade.wallet.toLowerCase());
 
       // Final score with all context
       const fullContext: SignalContext = {

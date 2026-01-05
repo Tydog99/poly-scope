@@ -44,7 +44,7 @@ export interface AccountHistory {
   // Enhanced fields from subgraph (optional for backward compatibility)
   creationDate?: Date; // True account creation from blockchain
   profitUsd?: number; // Lifetime P&L
-  dataSource?: 'data-api' | 'subgraph' | 'cache';
+  dataSource?: 'data-api' | 'subgraph' | 'subgraph-trades' | 'cache';
 }
 
 export interface PricePoint {

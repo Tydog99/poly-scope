@@ -294,7 +294,7 @@ docs/ (Planning documents)
 ## 10. Roadmap / Next Steps
 
 ### Critical
-- [ ] **Remove 50 account lookups limit** - Currently `src/commands/analyze.ts` artificially limits account fetches to 50 per analysis (`accountFetches < 50`). This causes many suspicious trades to show 100/100 on Account History signal due to missing data. Need to either remove the limit entirely, make it configurable, or implement smarter batching.
+- [x] ~~**Remove 50 account lookups limit**~~ - Implemented two-pass batch fetching with chunked subgraph queries (100 wallets per batch). No longer limited to 50 accounts.
 
 ### Immediate (Polish & Cleanup)
 - [x] ~~Decide on `scripts/test-subgraph.ts`~~ - deleted
@@ -327,3 +327,5 @@ docs/ (Planning documents)
 | 2026-01-05 | Added OSC 8 hyperlinks for copyable wallet addresses |
 | 2026-01-05 | Added `--top` CLI option (default 50) |
 | 2026-01-05 | Merged cli-updates branch into main |
+| 2026-01-05 | Implemented two-pass batch fetching to remove 50-account limit |
+| 2026-01-05 | Fixed broken Account entities by querying actual trade counts from enrichedOrderFilleds |

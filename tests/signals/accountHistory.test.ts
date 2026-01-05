@@ -72,7 +72,8 @@ describe('AccountHistorySignal', () => {
   });
 
   it('returns max score when no history available', async () => {
-    const result = await signal.calculate(makeTrade(), makeContext());
+    // Pass null to represent "no history found" vs undefined which means "skipped"
+    const result = await signal.calculate(makeTrade(), makeContext(null as any));
     expect(result.score).toBe(100);
   });
 

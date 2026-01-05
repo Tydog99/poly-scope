@@ -469,6 +469,74 @@ export class SubgraphClient {
     return (result?.marketPositions || []).map((p) => this.mapPosition(p));
   }
 
+  /**
+   * Get trade counts for multiple wallets in a single batched query.
+   * Used when Account entity has invalid numTrades (e.g., 0 trades but high volume).
+   * Queries actual enrichedOrderFilleds to count maker + taker trades.
+   *
+   * @param wallets - Array of wallet addresses to query
+   * @returns Map of wallet address to trade count (capped at 500 per wallet)
+   */
+  async getTradeCountBatch(wallets: string[]): Promise<Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>> {
+    const results = new Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>();
+
+    if (wallets.length === 0) {
+      return results;
+    }
+
+    const normalizedWallets = wallets.map((w) => w.toLowerCase());
+
+    // Chunk wallets - each wallet needs 2 aliases (maker + taker), so 50 wallets = 100 aliases
+    const CHUNK_SIZE = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < normalizedWallets.length; i += CHUNK_SIZE) {
+      chunks.push(normalizedWallets.slice(i, i + CHUNK_SIZE));
+    }
+
+    for (const chunk of chunks) {
+      // Build aliased query fragments for maker and taker trades
+      const fragments = chunk.flatMap((w, i) => [
+        `w${i}_maker: enrichedOrderFilleds(first: 500, where: {maker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
+        `w${i}_taker: enrichedOrderFilleds(first: 500, where: {taker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
+      ]);
+
+      const result = await this.query<Record<string, Array<{ id: string; timestamp: string }> | null>>(`
+        query {
+          ${fragments.join('\n')}
+        }
+      `);
+
+      if (!result) continue;
+
+      // Aggregate trades per wallet
+      for (let i = 0; i < chunk.length; i++) {
+        const wallet = chunk[i];
+        const makerTrades = result[`w${i}_maker`] || [];
+        const takerTrades = result[`w${i}_taker`] || [];
+
+        // Deduplicate by trade ID (in case same trade appears in both)
+        const tradeMap = new Map<string, number>();
+        for (const t of makerTrades) {
+          tradeMap.set(t.id, parseInt(t.timestamp));
+        }
+        for (const t of takerTrades) {
+          tradeMap.set(t.id, parseInt(t.timestamp));
+        }
+
+        const timestamps = [...tradeMap.values()];
+        const count = tradeMap.size;
+
+        results.set(wallet, {
+          count,
+          firstTimestamp: timestamps.length > 0 ? Math.min(...timestamps) : 0,
+          lastTimestamp: timestamps.length > 0 ? Math.max(...timestamps) : 0,
+        });
+      }
+    }
+
+    return results;
+  }
+
   // --- Mapping helpers ---
 
   private mapAccount(raw: RawAccount): SubgraphAccount {

@@ -87,6 +87,16 @@ vi.mock('../../src/api/accounts.js', () => ({
       lastTradeDate: new Date('2024-01-15'),
       totalVolumeUsd: 10000,
     });
+    getAccountHistoryBatch = vi.fn().mockResolvedValue(new Map([
+      ['0xsuspicious', {
+        wallet: '0xsuspicious',
+        totalTrades: 2,
+        firstTradeDate: new Date('2024-01-14'),
+        lastTradeDate: new Date('2024-01-15'),
+        totalVolumeUsd: 10000,
+        dataSource: 'subgraph',
+      }],
+    ]));
   },
 }));
 

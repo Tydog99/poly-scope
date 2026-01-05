@@ -164,7 +164,7 @@ describe('AccountFetcher', () => {
     });
 
     it('batch fetch uses cache for hits and fetches misses', async () => {
-      const cached = { wallet: '0xhit', totalTrades: 1 };
+      const cached = { wallet: '0xhit', totalTrades: 1, dataSource: 'subgraph' };
       mockLoad.mockImplementation((w: string) => w === '0xhit' ? cached : null);
 
       mockFetch.mockResolvedValueOnce({
@@ -175,7 +175,8 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher({ cacheAccountLookup: true });
       const results = await fetcher.getAccountHistoryBatch(['0xhit', '0xmiss']);
 
-      expect(results.get('0xhit')).toBe(cached);
+      // Cache hit returns with dataSource: 'cache'
+      expect(results.get('0xhit')).toEqual({ ...cached, dataSource: 'cache' });
       expect(results.get('0xmiss')).toBeDefined();
 
       // Should save the missing wallet after fetching

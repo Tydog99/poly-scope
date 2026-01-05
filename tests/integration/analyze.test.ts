@@ -38,6 +38,23 @@ vi.mock('../../src/api/accounts.js', () => ({
         totalVolumeUsd: acc?.totalVolumeUsd ?? 0,
       });
     });
+    getAccountHistoryBatch = vi.fn().mockImplementation((wallets: string[]) => {
+      const results = new Map();
+      for (const wallet of wallets) {
+        const acc = fixture.accounts[wallet.toLowerCase()] || fixture.accounts[wallet];
+        if (acc) {
+          results.set(wallet.toLowerCase(), {
+            wallet,
+            totalTrades: acc.totalTrades ?? 0,
+            firstTradeDate: acc.firstTradeDate ? new Date(acc.firstTradeDate) : null,
+            lastTradeDate: acc.lastTradeDate ? new Date(acc.lastTradeDate) : null,
+            totalVolumeUsd: acc.totalVolumeUsd ?? 0,
+            dataSource: 'subgraph',
+          });
+        }
+      }
+      return Promise.resolve(results);
+    });
   },
 }));
 
