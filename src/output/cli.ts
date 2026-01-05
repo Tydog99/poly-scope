@@ -1,6 +1,26 @@
-import chalk from 'chalk';
+import chalk, { type ChalkInstance } from 'chalk';
 import type { AnalysisReport, SuspiciousTrade } from './types.js';
 import type { WalletReport } from '../commands/investigate.js';
+
+// Colors for repeat wallets (excluding cyan which is for single-appearance)
+const WALLET_COLORS: ChalkInstance[] = [
+  chalk.magenta,
+  chalk.yellow,
+  chalk.green,
+  chalk.blue,
+  chalk.red,
+  chalk.magentaBright,
+  chalk.yellowBright,
+  chalk.greenBright,
+  chalk.blueBright,
+  chalk.redBright,
+];
+
+interface WalletStats {
+  count: number;
+  totalVolume: number;
+  color: ChalkInstance;
+}
 
 export class CLIReporter {
   formatAnalysisReport(report: AnalysisReport): string {
@@ -23,16 +43,137 @@ export class CLIReporter {
       return lines.join('\n');
     }
 
-    lines.push(chalk.bold.red('Top Suspicious Trades:'));
+    // Pre-scan wallets to find repeats and calculate stats
+    const walletStats = this.calculateWalletStats(report.suspiciousTrades);
+
+    lines.push(chalk.bold.red(`Top ${report.suspiciousTrades.length} Suspicious Trades:`));
     lines.push(chalk.gray('Weights: Size 40% | Acct 35% | Conv 25%'));
-    lines.push(chalk.gray('━'.repeat(50)));
+    lines.push('');
+
+    // Table header
+    const header = [
+      chalk.bold('#'.padStart(3)),
+      chalk.bold('Score'),
+      chalk.bold('Size'),
+      chalk.bold('Acct'),
+      chalk.bold('Conv'),
+      chalk.bold('Time'.padEnd(15)),
+      chalk.bold('Wallet'),
+      chalk.bold('Trade'),
+      chalk.bold('Tags'),
+    ].join('  ');
+    lines.push(header);
+    lines.push(chalk.gray('─'.repeat(120)));
 
     report.suspiciousTrades.forEach((st, idx) => {
-      lines.push(this.formatSuspiciousTrade(st, idx + 1));
-      lines.push('');
+      lines.push(this.formatSuspiciousTradeRow(st, idx + 1, walletStats));
     });
 
+    // Add wallet summary footer with full addresses for easy copying
+    const repeatWallets = this.getRepeatWalletsSummary(walletStats);
+    if (repeatWallets.length > 0) {
+      lines.push('');
+      lines.push(chalk.gray('─'.repeat(120)));
+      lines.push('');
+      lines.push(chalk.bold('Repeat Wallets (investigate these):'));
+      repeatWallets.forEach(({ wallet, stats }, idx) => {
+        const arrow = idx === 0 ? chalk.red(' ← top suspect') : '';
+        lines.push(
+          `  ${stats.color(wallet)}  ` +
+          `${String(stats.count).padStart(2)} trades  ` +
+          `${this.formatUsd(stats.totalVolume).padStart(12)} total` +
+          arrow
+        );
+      });
+    }
+
+    lines.push('');
     return lines.join('\n');
+  }
+
+  private calculateWalletStats(trades: SuspiciousTrade[]): Map<string, WalletStats> {
+    const stats = new Map<string, WalletStats>();
+
+    // First pass: count occurrences and sum volumes
+    for (const st of trades) {
+      const wallet = st.trade.wallet;
+      const existing = stats.get(wallet);
+      if (existing) {
+        existing.count++;
+        existing.totalVolume += st.trade.valueUsd;
+      } else {
+        stats.set(wallet, {
+          count: 1,
+          totalVolume: st.trade.valueUsd,
+          color: chalk.cyan, // Default for single appearance
+        });
+      }
+    }
+
+    // Second pass: assign colors to repeat wallets (sorted by volume)
+    const repeatWallets = [...stats.entries()]
+      .filter(([, s]) => s.count >= 2)
+      .sort((a, b) => b[1].totalVolume - a[1].totalVolume);
+
+    repeatWallets.forEach(([wallet], idx) => {
+      const walletStat = stats.get(wallet)!;
+      walletStat.color = WALLET_COLORS[idx % WALLET_COLORS.length];
+    });
+
+    return stats;
+  }
+
+  private getRepeatWalletsSummary(stats: Map<string, WalletStats>): Array<{ wallet: string; stats: WalletStats }> {
+    return [...stats.entries()]
+      .filter(([, s]) => s.count >= 2)
+      .sort((a, b) => b[1].totalVolume - a[1].totalVolume)
+      .map(([wallet, s]) => ({ wallet, stats: s }));
+  }
+
+  private formatSuspiciousTradeRow(st: SuspiciousTrade, rank: number, walletStats: Map<string, WalletStats>): string {
+    const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
+
+    // Get signal scores
+    const getScore = (name: string) => st.score.signals.find(s => s.name === name)?.score ?? 0;
+    const sizeScore = getScore('tradeSize');
+    const acctScore = getScore('accountHistory');
+    const convScore = getScore('conviction');
+
+    // Get wallet color
+    const walletStat = walletStats.get(st.trade.wallet);
+    const walletColor = walletStat?.color ?? chalk.cyan;
+
+    // Format classifications as compact tags
+    const tags = (st.classifications || []).map(c => {
+      if (c === 'WHALE') return chalk.blue('WHL');
+      if (c === 'SNIPER') return chalk.red('SNP');
+      if (c === 'EARLY_MOVER') return chalk.green('ERL');
+      if (c === 'DUMPING') return chalk.red('DMP');
+      return c.slice(0, 3).toUpperCase();
+    }).join(' ');
+
+    const cols = [
+      String(rank).padStart(3),
+      scoreColor(String(st.score.total).padStart(3) + '/100'),
+      String(sizeScore).padStart(3) + '/100',
+      String(acctScore).padStart(3) + '/100',
+      String(convScore).padStart(3) + '/100',
+      chalk.gray(this.formatTime(st.trade.timestamp)),
+      walletColor(this.truncateWallet(st.trade.wallet).padEnd(12)),
+      `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
+      tags,
+    ];
+
+    return cols.join('  ');
+  }
+
+  private formatTime(date: Date): string {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   private formatSuspiciousTrade(st: SuspiciousTrade, rank: number): string {
@@ -85,9 +226,16 @@ export class CLIReporter {
     return abbrevs[name] || name;
   }
 
-  truncateWallet(wallet: string): string {
+  truncateWallet(wallet: string, linkable = true): string {
     if (wallet.length <= 10) return wallet;
-    return `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
+    const truncated = `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
+
+    if (linkable) {
+      // OSC 8 terminal hyperlink - displays truncated but copies full address
+      // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
+      return `\x1b]8;;${wallet}\x07${truncated}\x1b]8;;\x07`;
+    }
+    return truncated;
   }
 
   formatUsd(value: number): string {
