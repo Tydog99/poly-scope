@@ -125,7 +125,7 @@ describe('AccountFetcher', () => {
       const history = await fetcher.getAccountHistory('0xcached');
 
       expect(mockLoad).toHaveBeenCalledWith('0xcached');
-      expect(history).toBe(cachedHistory);
+      expect(history).toEqual({ ...cachedHistory, dataSource: 'cache' });
       expect(mockFetch).not.toHaveBeenCalled(); // Should not fetch from network
     });
 
@@ -171,7 +171,7 @@ describe('AccountFetcher', () => {
       const fetcher = new AccountFetcher({ cacheAccountLookup: true });
       const results = await fetcher.getAccountHistoryBatch(['0xhit', '0xmiss']);
 
-      expect(results.get('0xhit')).toBe(cached);
+      expect(results.get('0xhit')).toEqual({ ...cached, dataSource: 'cache' });
       expect(results.get('0xmiss')).toBeDefined();
 
       // Should save the missing wallet after fetching
