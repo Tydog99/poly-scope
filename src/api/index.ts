@@ -4,7 +4,5 @@ export { TradeFetcher } from './trades.js';
 export { AccountFetcher } from './accounts.js';
 export { SlugResolver } from './slug.js';
 export type { ResolvedMarket } from './slug.js';
-export { loadCredentials, createL2Headers } from './auth.js';
-export type { ApiCredentials } from './auth.js';
 export { SubgraphClient, createSubgraphClient } from './subgraph.js';
 export type { SubgraphClientOptions, TradeQueryOptions } from './subgraph.js';

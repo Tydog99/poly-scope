@@ -14,6 +14,7 @@ export interface Market {
   endDate: string;
   resolved: boolean;
   winningOutcome?: string;
+  createdAt?: string;
 }
 
 export interface RawTrade {
