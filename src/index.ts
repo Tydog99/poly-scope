@@ -24,6 +24,7 @@ program
   .option('--outcome <YES|NO>', 'Filter to specific outcome')
   .option('--config <path>', 'Path to config file', './config.json')
   .option('--max-trades <number>', 'Max trades to fetch initially (default: 10000)', parseInt)
+  .option('--top <number>', 'Number of top suspicious trades to show (default: 50)', parseInt)
   .option('--min-size <usd>', 'Override minimum trade size', parseFloat)
   .option('--threshold <score>', 'Override alert threshold', parseFloat)
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
@@ -63,6 +64,7 @@ program
           before: opts.before ? new Date(opts.before) : undefined,
           outcome: opts.outcome?.toUpperCase() as 'YES' | 'NO' | undefined,
           maxTrades: opts.maxTrades,
+          topN: opts.top,
         });
 
         console.log(reporter.formatAnalysisReport(report));
