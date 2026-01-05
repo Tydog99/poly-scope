@@ -35,7 +35,7 @@ export class AccountFetcher {
     if (this.useCache) {
       const cached = this.cache.load(wallet);
       if (cached) {
-        return cached;
+        return { ...cached, dataSource: 'cache' };
       }
     }
 
@@ -73,7 +73,7 @@ export class AccountFetcher {
       for (const wallet of wallets) {
         const cached = this.cache.load(wallet);
         if (cached) {
-          results.set(wallet.toLowerCase(), cached);
+          results.set(wallet.toLowerCase(), { ...cached, dataSource: 'cache' });
         } else {
           walletsToFetch.push(wallet);
         }

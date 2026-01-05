@@ -15,7 +15,7 @@ export interface WalletReport {
   positions: SubgraphPosition[];
   recentTrades: SubgraphTrade[];
   suspicionFactors: string[];
-  dataSource: 'subgraph' | 'data-api';
+  dataSource: 'subgraph' | 'data-api' | 'cache';
 }
 
 export class InvestigateCommand {

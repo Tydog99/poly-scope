@@ -85,13 +85,18 @@ export class AnalyzeCommand {
     const scoredTrades: SuspiciousTrade[] = [];
     let processed = 0;
     let accountFetches = 0;
+    let cacheHits = 0;
 
     console.log(`Scoring ${tradesToAnalyze.length} trades...`);
 
     for (const trade of tradesToAnalyze) {
       processed++;
       if (processed % 100 === 0) {
-        console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
+        if (this.config.subgraph.cacheAccountLookup) {
+          console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} lookups, ${cacheHits} cached)`);
+        } else {
+          console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
+        }
       }
 
       // Filter out safe bets (high price buys/sells on resolved markets)
@@ -114,7 +119,11 @@ export class AnalyzeCommand {
       let accountHistory;
       if (quickScore.total > 60 && accountFetches < 50) {
         accountHistory = await this.accountFetcher.getAccountHistory(trade.wallet);
-        accountFetches++;
+        if (accountHistory.dataSource === 'cache') {
+          cacheHits++;
+        } else {
+          accountFetches++;
+        }
       }
 
       // Final score with all context
