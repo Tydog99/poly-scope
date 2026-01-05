@@ -86,6 +86,7 @@ Last updated: 2026-01-04
 - Merges new trades with cached data
 - Deduplicates by trade ID
 - Tracks newest/oldest timestamps for smart backfilling
+- **Account Lookups**: Currently NOT cached to ensure fresh profit/volume data; performance is maintained via Subgraph batching.
 
 ### Configuration System
 - `config.json` at project root
