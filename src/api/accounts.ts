@@ -91,14 +91,23 @@ export class AccountFetcher {
       // Use subgraph batch query
       const accounts = await this.subgraphClient.getAccountBatch(walletsToFetch);
       for (const [wallet, account] of accounts) {
+        const totalTrades = account.numTrades;
+        const volume = parseFloat(account.collateralVolume) / 1e6;
+        const profit = parseFloat(account.profit) / 1e6;
+
+        // Skip inconsistent subgraph data
+        if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(profit) > 0.1)) {
+          continue;
+        }
+
         const history: AccountHistory = {
           wallet: account.id,
-          totalTrades: account.numTrades,
+          totalTrades,
           firstTradeDate: new Date(account.creationTimestamp * 1000),
           lastTradeDate: new Date(account.lastSeenTimestamp * 1000),
-          totalVolumeUsd: parseFloat(account.collateralVolume) / 1e6,
+          totalVolumeUsd: volume,
           creationDate: new Date(account.creationTimestamp * 1000),
-          profitUsd: parseFloat(account.profit) / 1e6,
+          profitUsd: profit,
           dataSource: 'subgraph',
         };
         results.set(wallet.toLowerCase(), history);
@@ -137,14 +146,24 @@ export class AccountFetcher {
         return null;
       }
 
+      const totalTrades = account.numTrades;
+      const volume = parseFloat(account.collateralVolume) / 1e6;
+      const profit = parseFloat(account.profit) / 1e6;
+
+      // VALIDATION: If volume or profit exists, trades should likely be > 0.
+      // If subgraph returns 0 trades but high volume, fallback to Data API.
+      if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(profit) > 0.1)) {
+        return null;
+      }
+
       return {
         wallet: account.id,
-        totalTrades: account.numTrades,
+        totalTrades,
         firstTradeDate: new Date(account.creationTimestamp * 1000),
         lastTradeDate: new Date(account.lastSeenTimestamp * 1000),
-        totalVolumeUsd: parseFloat(account.collateralVolume) / 1e6,
+        totalVolumeUsd: volume,
         creationDate: new Date(account.creationTimestamp * 1000),
-        profitUsd: parseFloat(account.profit) / 1e6,
+        profitUsd: profit,
         dataSource: 'subgraph',
       };
     } catch {
