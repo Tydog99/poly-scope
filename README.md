@@ -39,6 +39,9 @@ npm run dev -- investigate -w <wallet> --trades 50
 # Disable subgraph (use Data API only)
 npm run dev -- analyze -m <market> --no-subgraph
 npm run dev -- investigate -w <wallet> --no-subgraph
+
+# Enable account lookup caching (saves results to .cache/accounts/)
+npm run dev -- analyze -m <market> --cache-account-lookup
 ```
 
 ## Caching
@@ -211,10 +214,10 @@ Configuration can be adjusted in `src/config.ts`.
 ## Safe Bet Filtering
 
 The tool automatically filters out "Safe Whale" trades to reduce noise. These are defined as:
-- **Side**: BUY
+- **Side**: BUY or SELL
 - **Price**: > $0.95 (Configurable via `safeBetThreshold`)
 
-These trades are typically yield farming (risking substantial capital for small % return on near-certain outcomes) and not indicative of insider information. You can disable this by setting `excludeSafeBets: false` in config.
+These trades are typically yield farming (buying) or profit taking (selling) on near-certain outcomes and not indicative of insider information. You can disable this by setting `excludeSafeBets: false` in config.
 
 ## Signals
 

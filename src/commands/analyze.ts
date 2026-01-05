@@ -41,7 +41,10 @@ export class AnalyzeCommand {
     }
 
     this.tradeFetcher = new TradeFetcher({ subgraphClient });
-    this.accountFetcher = new AccountFetcher({ subgraphClient });
+    this.accountFetcher = new AccountFetcher({
+      subgraphClient,
+      cacheAccountLookup: config.subgraph.cacheAccountLookup
+    });
     this.signals = [
       new TradeSizeSignal(),
       new AccountHistorySignal(),
@@ -91,11 +94,11 @@ export class AnalyzeCommand {
         console.log(`  Progress: ${processed}/${tradesToAnalyze.length} (${accountFetches} account lookups)`);
       }
 
-      // Filter out safe bets (high price buys)
+      // Filter out safe bets (high price buys/sells on resolved markets)
       if (
         this.config.filters.excludeSafeBets &&
-        trade.side === 'BUY' &&
-        trade.price >= this.config.filters.safeBetThreshold
+        trade.price >= this.config.filters.safeBetThreshold &&
+        (trade.side === 'BUY' || trade.side === 'SELL')
       ) {
         continue;
       }

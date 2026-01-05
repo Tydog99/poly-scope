@@ -35,6 +35,7 @@ export interface Config {
     enabled: boolean;
     timeout: number;
     retries: number;
+    cacheAccountLookup?: boolean;
   };
   alertThreshold: number;
   watchlist: string[];

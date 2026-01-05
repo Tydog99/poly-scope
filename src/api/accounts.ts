@@ -1,5 +1,6 @@
 import type { AccountHistory } from '../signals/types.js';
 import type { SubgraphClient } from './subgraph.js';
+import { AccountCache } from './account-cache.js';
 
 const DATA_API = 'https://data-api.polymarket.com';
 
@@ -12,29 +13,52 @@ interface DataApiTrade {
 
 export interface AccountFetcherOptions {
   subgraphClient?: SubgraphClient | null;
+  cacheAccountLookup?: boolean;
 }
 
 export class AccountFetcher {
   private subgraphClient: SubgraphClient | null;
+  private cache: AccountCache;
+  private useCache: boolean;
 
   constructor(options: AccountFetcherOptions = {}) {
     this.subgraphClient = options.subgraphClient || null;
+    this.useCache = options.cacheAccountLookup || false;
+    this.cache = new AccountCache();
   }
 
   /**
    * Get account history, preferring subgraph data when available
    */
   async getAccountHistory(wallet: string): Promise<AccountHistory> {
+    // Check cache first if enabled
+    if (this.useCache) {
+      const cached = this.cache.load(wallet);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    let history: AccountHistory;
+
     // Try subgraph first for more accurate data
     if (this.subgraphClient) {
       const subgraphHistory = await this.getFromSubgraph(wallet);
       if (subgraphHistory) {
-        return subgraphHistory;
+        history = subgraphHistory;
+      } else {
+        history = await this.getFromDataApi(wallet);
       }
+    } else {
+      history = await this.getFromDataApi(wallet);
     }
 
-    // Fall back to Data API
-    return this.getFromDataApi(wallet);
+    // Save to cache if enabled
+    if (this.useCache) {
+      this.cache.save(history);
+    }
+
+    return history;
   }
 
   /**
@@ -42,12 +66,32 @@ export class AccountFetcher {
    */
   async getAccountHistoryBatch(wallets: string[]): Promise<Map<string, AccountHistory>> {
     const results = new Map<string, AccountHistory>();
+    const walletsToFetch: string[] = [];
 
+    // Check cache first
+    if (this.useCache) {
+      for (const wallet of wallets) {
+        const cached = this.cache.load(wallet);
+        if (cached) {
+          results.set(wallet.toLowerCase(), cached);
+        } else {
+          walletsToFetch.push(wallet);
+        }
+      }
+    } else {
+      walletsToFetch.push(...wallets);
+    }
+
+    if (walletsToFetch.length === 0) {
+      return results;
+    }
+
+    // Fetch missing wallets
     if (this.subgraphClient) {
       // Use subgraph batch query
-      const accounts = await this.subgraphClient.getAccountBatch(wallets);
+      const accounts = await this.subgraphClient.getAccountBatch(walletsToFetch);
       for (const [wallet, account] of accounts) {
-        results.set(wallet, {
+        const history: AccountHistory = {
           wallet: account.id,
           totalTrades: account.numTrades,
           firstTradeDate: new Date(account.creationTimestamp * 1000),
@@ -56,20 +100,24 @@ export class AccountFetcher {
           creationDate: new Date(account.creationTimestamp * 1000),
           profitUsd: parseFloat(account.profit) / 1e6,
           dataSource: 'subgraph',
-        });
+        };
+        results.set(wallet.toLowerCase(), history);
+        if (this.useCache) this.cache.save(history);
       }
 
       // For wallets not found in subgraph, try Data API
-      const missing = wallets.filter((w) => !results.has(w.toLowerCase()));
+      const missing = walletsToFetch.filter((w) => !results.has(w.toLowerCase()));
       for (const wallet of missing) {
         const history = await this.getFromDataApi(wallet);
         results.set(wallet.toLowerCase(), history);
+        if (this.useCache) this.cache.save(history);
       }
     } else {
       // Fall back to sequential Data API calls
-      for (const wallet of wallets) {
+      for (const wallet of walletsToFetch) {
         const history = await this.getFromDataApi(wallet);
         results.set(wallet.toLowerCase(), history);
+        if (this.useCache) this.cache.save(history);
       }
     }
 
