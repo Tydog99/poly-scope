@@ -51,13 +51,31 @@ export class TradeFetcher {
     // Try subgraph first if available AND we have token IDs
     if (this.subgraphClient && options.market?.tokens?.length) {
       try {
-        const trades = await this.fetchFromSubgraph(marketId, options);
+        // Optimize: Use cache timestamp to only fetch new trades
+        const fetchOptions = { ...options };
+        if (cached?.newestTimestamp) {
+          const cachedDate = new Date(cached.newestTimestamp * 1000);
+          console.log(`Found ${cached.trades.length} cached trades (latest: ${cachedDate.toISOString()})`);
+
+          // If user didn't specify 'after', or if cache is newer than user's 'after', use cache
+          if (!options.after || cachedDate > options.after) {
+            fetchOptions.after = cachedDate;
+          }
+        }
+
+        const trades = await this.fetchFromSubgraph(marketId, fetchOptions);
+
         if (trades.length > 0) {
+          console.log(`Synced ${trades.length} new trades from subgraph`);
           // Merge with cache
           const merged = this.cache.merge(marketId, trades);
           return this.applyFilters(merged.trades, options);
+        } else if (cached && cached.trades.length > 0) {
+          console.log('No new trades from subgraph, using cache');
+          return this.applyFilters(cached.trades, options);
         }
-        // No trades from subgraph - could be empty market or issue
+
+        // No trades from subgraph AND no cache - could be empty market or issue
         if (options.allowDataApiFallback === false) {
           console.log('Subgraph returned no trades');
           return [];

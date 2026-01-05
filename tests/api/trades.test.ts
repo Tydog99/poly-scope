@@ -8,7 +8,7 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Suppress console.log in tests
-vi.spyOn(console, 'log').mockImplementation(() => {});
+vi.spyOn(console, 'log').mockImplementation(() => { });
 
 // Timestamps in seconds (API format) - Jan 15, 2024
 const TRADE_TIMESTAMP = 1705320000;
@@ -248,6 +248,73 @@ describe('TradeFetcher', () => {
       expect(mockSubgraphClient.getTradesByMarket).not.toHaveBeenCalled();
       expect(trades).toHaveLength(1);
       expect(trades[0].id).toBe('0xtx1'); // From Data API
+    });
+
+    it('uses cached timestamp for incremental query', async () => {
+      const mockSubgraphClient = {
+        getTradesByMarket: vi.fn().mockResolvedValue([]),
+      } as unknown as SubgraphClient;
+
+      const mockCache = createMockCache();
+      const cachedDate = new Date(TRADE_TIMESTAMP * 1000);
+
+      // Setup cache with existing trades
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: '0xcondition1',
+        newestTimestamp: TRADE_TIMESTAMP,
+        oldestTimestamp: TRADE_TIMESTAMP - 1000,
+        trades: [{ id: 'old_trade', timestamp: cachedDate } as any],
+      });
+
+      const fetcher = new TradeFetcher({
+        cache: mockCache,
+        subgraphClient: mockSubgraphClient,
+      });
+
+      await fetcher.getTradesForMarket('0xcondition1', {
+        market: mockMarket,
+      });
+
+      // Verify called with correct date filter
+      expect(mockSubgraphClient.getTradesByMarket).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          after: cachedDate,
+        })
+      );
+    });
+
+    it('returns cached trades when no new trades found', async () => {
+      const mockSubgraphClient = {
+        getTradesByMarket: vi.fn().mockResolvedValue([]),
+      } as unknown as SubgraphClient;
+
+      const mockCache = createMockCache();
+      const cachedTrades = [{
+        id: 'old_trade',
+        timestamp: new Date(TRADE_TIMESTAMP * 1000),
+        wallet: '0xold',
+        valueUsd: 100
+      } as any];
+
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: '0xcondition1',
+        newestTimestamp: TRADE_TIMESTAMP,
+        oldestTimestamp: TRADE_TIMESTAMP,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({
+        cache: mockCache,
+        subgraphClient: mockSubgraphClient,
+      });
+
+      const trades = await fetcher.getTradesForMarket('0xcondition1', {
+        market: mockMarket,
+      });
+
+      expect(trades).toHaveLength(1);
+      expect(trades[0].id).toBe('old_trade');
     });
   });
 });
