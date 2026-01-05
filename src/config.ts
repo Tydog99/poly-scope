@@ -19,6 +19,14 @@ export interface Config {
   conviction: {
     minPositionPercent: number;
   };
+  classification: {
+    whaleThreshold: number;
+    sniperSizeMax: number;
+    sniperImpactMin: number;
+    sniperScoreMin: number;
+    earlyWindowHours: number;
+    dumpImpactMin: number;
+  };
   subgraph: {
     enabled: boolean;
     timeout: number;
@@ -47,6 +55,14 @@ export const DEFAULT_CONFIG: Config = {
   conviction: {
     minPositionPercent: 80,
   },
+  classification: {
+    whaleThreshold: 25000,
+    sniperSizeMax: 10000,
+    sniperImpactMin: 2.0,
+    sniperScoreMin: 80,
+    earlyWindowHours: 48,
+    dumpImpactMin: 5.0,
+  },
   subgraph: {
     enabled: true,
     timeout: 30000,
@@ -71,6 +87,7 @@ export function loadConfig(path: string = './config.json'): Config {
     tradeSize: { ...DEFAULT_CONFIG.tradeSize, ...userConfig.tradeSize },
     accountHistory: { ...DEFAULT_CONFIG.accountHistory, ...userConfig.accountHistory },
     conviction: { ...DEFAULT_CONFIG.conviction, ...userConfig.conviction },
+    classification: { ...DEFAULT_CONFIG.classification, ...userConfig.classification },
     subgraph: { ...DEFAULT_CONFIG.subgraph, ...userConfig.subgraph },
   };
 }

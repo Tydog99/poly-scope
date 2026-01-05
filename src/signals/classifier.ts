@@ -1,35 +1,33 @@
 import type { Trade } from './types.js';
+import type { Config } from '../config.js';
 import type { AggregatedScore } from '../signals/types.js';
 import type { SuspiciousTrade } from '../output/types.js';
 
 export type TradeClassification = 'WHALE' | 'SNIPER' | 'EARLY_MOVER' | 'DUMPING';
 
 export class TradeClassifier {
+    constructor(private config: Config) { }
+
     classify(trade: SuspiciousTrade, scoreResult: AggregatedScore, marketCreatedAt?: Date): TradeClassification[] {
         const classifications: TradeClassification[] = [];
-
-        // Configurable thresholds (could be moved to config)
-        const WHALE_THRESHOLD = 25000;
-        const SNIPER_SIZE_MAX = 10000;
-        const SNIPER_IMPACT_MIN = 2.0;
-        const SNIPER_SCORE_MIN = 80;
-        const EARLY_WINDOW_HOURS = 48;
-        const DUMP_IMPACT_MIN = 5.0;
+        const {
+            whaleThreshold, sniperSizeMax, sniperImpactMin,
+            sniperScoreMin, earlyWindowHours, dumpImpactMin
+        } = this.config.classification;
 
         // WHALE: Large absolute size
-        if (trade.trade.valueUsd >= WHALE_THRESHOLD) {
+        if (trade.trade.valueUsd >= whaleThreshold) {
             classifications.push('WHALE');
         }
 
         // SNIPER: High score + meaningful impact + not huge size
-        // Using trade size signal details for impact if available
         const impact = trade.priceImpact?.changePercent || 0;
 
         // Check if it's a sniper
         if (
-            trade.score.total >= SNIPER_SCORE_MIN &&
-            Math.abs(impact) >= SNIPER_IMPACT_MIN &&
-            trade.trade.valueUsd < WHALE_THRESHOLD // Whales aren't usually called snipers
+            trade.score.total >= sniperScoreMin &&
+            Math.abs(impact) >= sniperImpactMin &&
+            trade.trade.valueUsd < whaleThreshold // Whales aren't usually called snipers
         ) {
             classifications.push('SNIPER');
         }
@@ -37,16 +35,16 @@ export class TradeClassifier {
         // DUMPING: Large price drop on sell
         if (
             trade.trade.side === 'SELL' &&
-            impact <= -DUMP_IMPACT_MIN
+            impact <= -dumpImpactMin
         ) {
             classifications.push('DUMPING');
         }
 
-        // EARLY MOVER: Trade within 48h of creation
+        // EARLY MOVER: Trade within window of creation
         if (marketCreatedAt) {
             const diffMs = trade.trade.timestamp.getTime() - marketCreatedAt.getTime();
             const diffHours = diffMs / (1000 * 60 * 60);
-            if (diffHours >= 0 && diffHours <= EARLY_WINDOW_HOURS) {
+            if (diffHours >= 0 && diffHours <= earlyWindowHours) {
                 classifications.push('EARLY_MOVER');
             }
         }

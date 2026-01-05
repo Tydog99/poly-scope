@@ -47,7 +47,7 @@ export class AnalyzeCommand {
       new ConvictionSignal(),
     ];
     this.aggregator = new SignalAggregator(config);
-    this.classifier = new TradeClassifier();
+    this.classifier = new TradeClassifier(config);
   }
 
   async execute(options: AnalyzeOptions): Promise<AnalysisReport> {

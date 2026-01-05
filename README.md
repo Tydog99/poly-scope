@@ -183,13 +183,28 @@ A suspicious trading pattern was identified on the Venezuela market:
 
 **Suspicious Trades:**
 - $6,000 Buy (Jan 2, 16:49 UTC)
-- $6,000 Buy (Jan 3, 01:38 UTC)
-- $7,000 Buy (Jan 3, 02:15 UTC)
-- $7,215 Buy (Jan 3, 02:58 UTC)
+- $6,000 Buy (Jan 3, 01:38 UTC) -> Moved price +4.0%
+- $7,000 Buy (Jan 3, 02:15 UTC) -> Moved price +33.3%
+- $7,215 Buy (Jan 3, 02:58 UTC) -> Moved price +2.3%
 
 **Red Flags:**
+- **"Sniper" Behavior**: Entering with medium size (~$7k) during extremely low liquidity periods.
+- **Market Impact**: The $7k trade at 02:15 caused a massive 33% price jump.
 - New account (created 6 days before trades)
 - Massive one-sided buying ($381K bought vs $22K sold)
+
+## Trade Classification System
+
+The CLI tool automatically classifies suspicious trades based on behavior:
+
+| Badge | Criteria | Configurable? |
+|-------|----------|---------------|
+| `[WHALE]` | Trade Value > $25,000 | Yes (`whaleThreshold`) |
+| `[SNIPER]` | Score > 80 AND Impact > 2% AND Size < $25k | Yes (`sniper*`) |
+| `[EARLY MOVER]`| Trading within first 48h of market creation | Yes (`earlyWindowHours`) |
+| `[DUMPING]` | SELL trade causing > 5% price drop | Yes (`dumpImpactMin`) |
+
+Configuration can be adjusted in `src/config.ts`.
 - Large round-number trades
 - Heavy position buildup followed by selling
 
