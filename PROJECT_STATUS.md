@@ -1,6 +1,6 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-05
+Last updated: 2026-01-06
 
 ## 1. Current Implementation - Fully Functional
 
@@ -23,6 +23,8 @@ Last updated: 2026-01-05
    - Profiles a specific wallet address
    - Shows recent trades and market positions
    - Analyzes suspicion factors (account age, trade count, concentration, profit rate)
+   - **NEW**: Runs wallet's trades through the suspicious trade analyzer (same 3-signal system as `analyze`)
+   - `--analyze-limit <n>` flag controls how many trades to analyze (default: 100, 0 to disable)
 
 ### Three Weighted Detection Signals
 
@@ -338,3 +340,4 @@ docs/ (Planning documents)
 | 2026-01-05 | Fixed wallet action determination (maker vs taker side interpretation) |
 | 2026-01-05 | Added CLOB documentation to CLAUDE.md |
 | 2026-01-05 | Fixed complementary token filtering: uses position data to show YES or NO trades based on wallet holdings |
+| 2026-01-06 | Enhanced investigate: runs wallet trades through 3-signal suspicious trade analyzer with `--analyze-limit` flag |
