@@ -350,3 +350,4 @@ docs/ (Planning documents)
 | 2026-01-06 | Fixed complementary trade detection: now works at transaction level - when a tx has both YES/NO trades, the smaller value side is marked [C] (order routing artifact) |
 | 2026-01-06 | Exclude complementary trades from market subtotals - they're order routing artifacts, not primary intent |
 | 2026-01-06 | Fixed P&L calculation: now uses `valueSold - valueBought` instead of `netValue` directly (negative netValue = profit, was confusing) |
+| 2026-01-06 | Fixed trading P&L for held positions: shows "held" (not "unrealized") and counts as $0 P&L instead of negative cost basis |
