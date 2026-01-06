@@ -43,7 +43,9 @@ export interface AccountHistory {
   totalVolumeUsd: number;
   // Enhanced fields from subgraph (optional for backward compatibility)
   creationDate?: Date; // True account creation from blockchain
-  profitUsd?: number; // Lifetime P&L
+  profitUsd?: number; // Lifetime P&L (trading + redemptions)
+  tradingProfitUsd?: number; // valueSold - valueBought (before redemptions)
+  redemptionPayoutsUsd?: number; // Total payouts from resolved winning positions
   dataSource?: 'data-api' | 'subgraph' | 'subgraph-trades' | 'cache';
 }
 

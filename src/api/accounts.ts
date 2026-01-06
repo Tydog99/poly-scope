@@ -114,10 +114,14 @@ export class AccountFetcher {
       const brokenAccounts: Array<{
         wallet: string;
         volume: number;
-        profit: number;
+        tradingProfit: number;
+        redemptionPayouts: number;
         creationTimestamp: number;
         lastSeenTimestamp: number;
       }> = [];
+
+      // Fetch redemptions for all wallets in batch
+      const allRedemptions = await this.subgraphClient.getRedemptionsBatch(walletsToFetch);
 
       // Process chunks sequentially to avoid rate limiting
       for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
@@ -131,14 +135,23 @@ export class AccountFetcher {
         for (const [wallet, account] of accounts) {
           const totalTrades = account.numTrades;
           const volume = parseFloat(account.collateralVolume) / 1e6;
-          const profit = parseFloat(account.profit) / 1e6;
+          const tradingProfit = parseFloat(account.profit) / 1e6;
+
+          // Sum redemption payouts for this wallet
+          const walletRedemptions = allRedemptions.get(wallet.toLowerCase()) || [];
+          const redemptionPayouts = walletRedemptions.reduce(
+            (sum, r) => sum + parseFloat(r.payout) / 1e6,
+            0
+          );
+          const totalProfit = tradingProfit + redemptionPayouts;
 
           // Detect broken Account entity (numTrades=0 but has volume/profit)
-          if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(profit) > 0.1)) {
+          if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(tradingProfit) > 0.1)) {
             brokenAccounts.push({
               wallet: account.id,
               volume,
-              profit,
+              tradingProfit,
+              redemptionPayouts,
               creationTimestamp: account.creationTimestamp,
               lastSeenTimestamp: account.lastSeenTimestamp,
             });
@@ -152,7 +165,9 @@ export class AccountFetcher {
             lastTradeDate: new Date(account.lastSeenTimestamp * 1000),
             totalVolumeUsd: volume,
             creationDate: new Date(account.creationTimestamp * 1000),
-            profitUsd: profit,
+            profitUsd: totalProfit,
+            tradingProfitUsd: tradingProfit,
+            redemptionPayoutsUsd: redemptionPayouts,
             dataSource: 'subgraph',
           };
           results.set(wallet.toLowerCase(), history);
@@ -170,6 +185,7 @@ export class AccountFetcher {
         for (const broken of brokenAccounts) {
           const tradeData = tradeCounts.get(broken.wallet.toLowerCase());
           const actualCount = tradeData?.count ?? 0;
+          const totalProfit = broken.tradingProfit + broken.redemptionPayouts;
 
           const history: AccountHistory = {
             wallet: broken.wallet,
@@ -182,7 +198,9 @@ export class AccountFetcher {
               : new Date(broken.lastSeenTimestamp * 1000),
             totalVolumeUsd: broken.volume,
             creationDate: new Date(broken.creationTimestamp * 1000),
-            profitUsd: broken.profit,
+            profitUsd: totalProfit,
+            tradingProfitUsd: broken.tradingProfit,
+            redemptionPayoutsUsd: broken.redemptionPayouts,
             dataSource: 'subgraph-trades',
           };
           results.set(broken.wallet.toLowerCase(), history);
@@ -220,7 +238,12 @@ export class AccountFetcher {
     if (!this.subgraphClient) return null;
 
     try {
-      const account = await this.subgraphClient.getAccount(wallet);
+      // Fetch account and redemptions in parallel
+      const [account, redemptions] = await Promise.all([
+        this.subgraphClient.getAccount(wallet),
+        this.subgraphClient.getRedemptions(wallet),
+      ]);
+
       if (!account) {
         // Account not found in subgraph - might be very new or never traded
         return null;
@@ -228,12 +251,41 @@ export class AccountFetcher {
 
       const totalTrades = account.numTrades;
       const volume = parseFloat(account.collateralVolume) / 1e6;
-      const profit = parseFloat(account.profit) / 1e6;
+      const tradingProfit = parseFloat(account.profit) / 1e6; // valueSold - valueBought
+
+      // Sum redemption payouts (resolved winning positions)
+      const redemptionPayouts = redemptions.reduce(
+        (sum, r) => sum + parseFloat(r.payout) / 1e6,
+        0
+      );
+
+      // True profit = trading P&L + redemption payouts
+      const totalProfit = tradingProfit + redemptionPayouts;
 
       // VALIDATION: If volume or profit exists, trades should likely be > 0.
-      // If subgraph returns 0 trades but high volume, fallback to Data API.
-      if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(profit) > 0.1)) {
-        return null;
+      // If subgraph returns 0 trades but high volume, query actual trades.
+      if (totalTrades === 0 && (Math.abs(volume) > 0 || Math.abs(tradingProfit) > 0.1)) {
+        // Query actual trade counts for this broken account
+        const tradeCounts = await this.subgraphClient.getTradeCountBatch([wallet]);
+        const tradeData = tradeCounts.get(wallet.toLowerCase());
+        const actualCount = tradeData?.count ?? 0;
+
+        return {
+          wallet: account.id,
+          totalTrades: actualCount,
+          firstTradeDate: tradeData?.firstTimestamp
+            ? new Date(tradeData.firstTimestamp * 1000)
+            : new Date(account.creationTimestamp * 1000),
+          lastTradeDate: tradeData?.lastTimestamp
+            ? new Date(tradeData.lastTimestamp * 1000)
+            : new Date(account.lastSeenTimestamp * 1000),
+          totalVolumeUsd: volume,
+          creationDate: new Date(account.creationTimestamp * 1000),
+          profitUsd: totalProfit,
+          tradingProfitUsd: tradingProfit,
+          redemptionPayoutsUsd: redemptionPayouts,
+          dataSource: 'subgraph-trades',
+        };
       }
 
       return {
@@ -243,7 +295,9 @@ export class AccountFetcher {
         lastTradeDate: new Date(account.lastSeenTimestamp * 1000),
         totalVolumeUsd: volume,
         creationDate: new Date(account.creationTimestamp * 1000),
-        profitUsd: profit,
+        profitUsd: totalProfit,
+        tradingProfitUsd: tradingProfit,
+        redemptionPayoutsUsd: redemptionPayouts,
         dataSource: 'subgraph',
       };
     } catch {

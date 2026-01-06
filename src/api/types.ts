@@ -87,3 +87,10 @@ export interface SubgraphPosition {
   quantitySold: string;
   netQuantity: string;
 }
+
+export interface SubgraphRedemption {
+  id: string;
+  timestamp: number;
+  payout: string; // BigInt as string, 6 decimals
+  conditionId: string;
+}

@@ -5,7 +5,7 @@
  * directly from the Polygon blockchain.
  */
 
-import type { SubgraphAccount, SubgraphTrade, SubgraphPosition } from './types.js';
+import type { SubgraphAccount, SubgraphTrade, SubgraphPosition, SubgraphRedemption } from './types.js';
 
 const DEFAULT_SUBGRAPH_ID = '81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC';
 
@@ -470,6 +470,80 @@ export class SubgraphClient {
   }
 
   /**
+   * Get redemptions for a wallet (payouts from resolved markets)
+   */
+  async getRedemptions(wallet: string): Promise<SubgraphRedemption[]> {
+    const normalizedWallet = wallet.toLowerCase();
+
+    const result = await this.query<{ redemptions: RawRedemption[] }>(`
+      query($user: String!) {
+        redemptions(
+          first: 100,
+          where: { redeemer_: { id: $user } }
+          orderBy: timestamp
+          orderDirection: desc
+        ) {
+          id
+          timestamp
+          payout
+          condition { id }
+        }
+      }
+    `, { user: normalizedWallet });
+
+    return (result?.redemptions || []).map((r) => this.mapRedemption(r));
+  }
+
+  /**
+   * Get redemptions for multiple wallets in a single batched query
+   */
+  async getRedemptionsBatch(wallets: string[]): Promise<Map<string, SubgraphRedemption[]>> {
+    const results = new Map<string, SubgraphRedemption[]>();
+
+    if (wallets.length === 0) {
+      return results;
+    }
+
+    const normalizedWallets = wallets.map((w) => w.toLowerCase());
+
+    // Chunk wallets to avoid query complexity limits
+    const CHUNK_SIZE = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < normalizedWallets.length; i += CHUNK_SIZE) {
+      chunks.push(normalizedWallets.slice(i, i + CHUNK_SIZE));
+    }
+
+    for (const chunk of chunks) {
+      // Build aliased query fragments
+      const fragments = chunk.map((w, i) => `
+        r${i}: redemptions(first: 100, where: { redeemer_: { id: "${w}" } }) {
+          id
+          timestamp
+          payout
+          condition { id }
+        }
+      `);
+
+      const result = await this.query<Record<string, RawRedemption[] | null>>(`
+        query {
+          ${fragments.join('\n')}
+        }
+      `);
+
+      if (!result) continue;
+
+      // Map results back to wallets
+      for (let i = 0; i < chunk.length; i++) {
+        const wallet = chunk[i];
+        const rawRedemptions = result[`r${i}`] || [];
+        results.set(wallet, rawRedemptions.map((r) => this.mapRedemption(r)));
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Get trade counts for multiple wallets in a single batched query.
    * Used when Account entity has invalid numTrades (e.g., 0 trades but high volume).
    * Queries actual enrichedOrderFilleds to count maker + taker trades.
@@ -577,6 +651,15 @@ export class SubgraphClient {
       netQuantity: raw.netQuantity,
     };
   }
+
+  private mapRedemption(raw: RawRedemption): SubgraphRedemption {
+    return {
+      id: raw.id,
+      timestamp: parseInt(raw.timestamp),
+      payout: raw.payout,
+      conditionId: raw.condition?.id || '',
+    };
+  }
 }
 
 // Raw types from GraphQL responses
@@ -611,6 +694,13 @@ interface RawPosition {
   quantityBought: string;
   quantitySold: string;
   netQuantity: string;
+}
+
+interface RawRedemption {
+  id: string;
+  timestamp: string;
+  payout: string;
+  condition?: { id: string };
 }
 
 /**

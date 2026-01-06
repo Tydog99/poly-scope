@@ -238,6 +238,11 @@ export class CLIReporter {
     return truncated;
   }
 
+  private truncateQuestion(question: string, maxLen: number): string {
+    if (question.length <= maxLen) return question;
+    return question.slice(0, maxLen - 3) + '...';
+  }
+
   formatUsd(value: number): string {
     return '$' + Math.round(value).toLocaleString('en-US');
   }
@@ -271,13 +276,28 @@ export class CLIReporter {
         lines.push(`  First Trade: ${h.firstTradeDate.toLocaleDateString()} (${ageDays} days ago)`);
       }
 
-      lines.push(`  Total Trades: ${h.totalTrades.toLocaleString()}`);
+      // Show trade counts - fills count is from totalTrades, markets from positions
+      const fillsCount = h.totalTrades;
+      const marketsCount = report.positions?.length ?? 0;
+      if (marketsCount > 0 && fillsCount > 0) {
+        lines.push(`  Total Trades: ${marketsCount} markets (${fillsCount.toLocaleString()} fills)`);
+      } else {
+        lines.push(`  Total Trades: ${fillsCount.toLocaleString()}`);
+      }
       lines.push(`  Total Volume: ${this.formatUsd(h.totalVolumeUsd)}`);
 
       if (h.profitUsd !== undefined) {
         const profitColor = h.profitUsd >= 0 ? chalk.green : chalk.red;
         const sign = h.profitUsd >= 0 ? '+' : '';
-        lines.push(`  Profit/Loss: ${profitColor(sign + this.formatUsd(h.profitUsd))}`);
+
+        // Show profit breakdown if we have redemption data
+        if (h.redemptionPayoutsUsd !== undefined && h.tradingProfitUsd !== undefined && h.redemptionPayoutsUsd > 0) {
+          const tradingSign = h.tradingProfitUsd >= 0 ? '+' : '';
+          lines.push(`  Profit/Loss: ${profitColor(sign + this.formatUsd(h.profitUsd))} ` +
+            chalk.gray(`(trading: ${tradingSign}${this.formatUsd(h.tradingProfitUsd)}, redemptions: +${this.formatUsd(h.redemptionPayoutsUsd)})`));
+        } else {
+          lines.push(`  Profit/Loss: ${profitColor(sign + this.formatUsd(h.profitUsd))}`);
+        }
 
         if (h.totalVolumeUsd > 0) {
           const roi = (h.profitUsd / h.totalVolumeUsd) * 100;
@@ -305,8 +325,15 @@ export class CLIReporter {
         const netValue = parseFloat(pos.netValue) / 1e6;
         const netQty = parseFloat(pos.netQuantity) / 1e6;
         const valueColor = netValue >= 0 ? chalk.green : chalk.red;
+
+        // Use resolved market name if available
+        const resolved = report.resolvedMarkets?.get(pos.marketId);
+        const marketDisplay = resolved
+          ? this.truncateQuestion(resolved.question, 35) + ` (${resolved.outcome})`
+          : pos.marketId.slice(0, 16) + '...';
+
         lines.push(
-          `  ${chalk.gray(pos.marketId.slice(0, 16))}... ${valueColor(this.formatUsd(netValue))} (${netQty.toFixed(0)} shares)`
+          `  ${chalk.cyan(marketDisplay)} ${valueColor(this.formatUsd(netValue))} (${netQty.toFixed(0)} shares)`
         );
       }
       if (report.positions.length > 10) {
@@ -315,23 +342,127 @@ export class CLIReporter {
       lines.push('');
     }
 
-    // Recent Trades
+    // Recent Trades - grouped by market, aggregated by transaction
     if (report.recentTrades.length > 0) {
-      lines.push(chalk.bold(`Recent Trades (${report.recentTrades.length}):`));
-      for (const trade of report.recentTrades.slice(0, 10)) {
+      lines.push(chalk.bold(`Recent Trades (${report.recentTrades.length} fills):`));
+      lines.push('');
+
+      // Aggregate trades by market and transaction hash
+      interface AggregatedTrade {
+        txHash: string;
+        timestamp: number;
+        buyValue: number;
+        sellValue: number;
+        avgBuyPrice: number;
+        avgSellPrice: number;
+        fillCount: number;
+      }
+
+      const tradesByMarket = new Map<string, Map<string, AggregatedTrade>>();
+
+      for (const trade of report.recentTrades) {
+        const marketId = trade.marketId || 'unknown';
+        if (!tradesByMarket.has(marketId)) {
+          tradesByMarket.set(marketId, new Map());
+        }
+
+        const marketTrades = tradesByMarket.get(marketId)!;
+        const txHash = trade.transactionHash;
+
+        if (!marketTrades.has(txHash)) {
+          marketTrades.set(txHash, {
+            txHash,
+            timestamp: trade.timestamp,
+            buyValue: 0,
+            sellValue: 0,
+            avgBuyPrice: 0,
+            avgSellPrice: 0,
+            fillCount: 0,
+          });
+        }
+
+        const agg = marketTrades.get(txHash)!;
         const size = parseFloat(trade.size) / 1e6;
         const price = parseFloat(trade.price);
         const value = size * price;
-        const date = new Date(trade.timestamp * 1000);
-        const sideColor = trade.side === 'Buy' ? chalk.green : chalk.red;
-        lines.push(
-          `  ${date.toLocaleDateString()} ${sideColor(trade.side.padEnd(4))} ${this.formatUsd(value).padStart(10)} @ ${price.toFixed(2)}`
-        );
+
+        if (trade.side === 'Buy') {
+          agg.avgBuyPrice = (agg.avgBuyPrice * agg.buyValue + price * value) / (agg.buyValue + value || 1);
+          agg.buyValue += value;
+        } else {
+          agg.avgSellPrice = (agg.avgSellPrice * agg.sellValue + price * value) / (agg.sellValue + value || 1);
+          agg.sellValue += value;
+        }
+        agg.fillCount++;
       }
-      if (report.recentTrades.length > 10) {
-        lines.push(chalk.gray(`  ... and ${report.recentTrades.length - 10} more`));
-      }
+
+      // Convert to sorted arrays
+      const sortedMarkets = [...tradesByMarket.entries()]
+        .map(([marketId, txMap]) => ({
+          marketId,
+          trades: [...txMap.values()].sort((a, b) => b.timestamp - a.timestamp),
+        }))
+        .sort((a, b) => {
+          const aLatest = Math.max(...a.trades.map(t => t.timestamp));
+          const bLatest = Math.max(...b.trades.map(t => t.timestamp));
+          return bLatest - aLatest;
+        });
+
+      // Count unique transactions
+      const totalTxns = sortedMarkets.reduce((sum, m) => sum + m.trades.length, 0);
+      lines.push(chalk.gray(`  ${totalTxns} transactions across ${sortedMarkets.length} markets`));
       lines.push('');
+
+      // Table header
+      lines.push(
+        chalk.gray('  Date              Time      Side         Value       Price   Fills   TxHash')
+      );
+      lines.push(chalk.gray('  ' + '─'.repeat(85)));
+
+      for (const { marketId, trades } of sortedMarkets) {
+        // Market header with resolved name or truncated ID
+        const resolved = report.resolvedMarkets?.get(marketId);
+        const marketDisplay = resolved
+          ? this.truncateQuestion(resolved.question, 45) + chalk.gray(` (${resolved.outcome})`)
+          : chalk.gray(marketId.length > 20 ? marketId.slice(0, 10) + '...' + marketId.slice(-8) : marketId);
+        lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
+
+        // Show all aggregated trades
+        for (const agg of trades) {
+          const date = new Date(agg.timestamp * 1000);
+          const txHash = agg.txHash.slice(0, 10) + '...';
+
+          const dateStr = date.toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+          });
+          const timeStr = date.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          });
+
+          // Show buy line if there were buys
+          if (agg.buyValue > 0) {
+            lines.push(
+              `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.green('Buy'.padEnd(6))} ` +
+              `${this.formatUsd(agg.buyValue).padStart(12)}  @${agg.avgBuyPrice.toFixed(2).padStart(5)}   ` +
+              `${String(agg.fillCount).padStart(3)}    ${chalk.gray(txHash)}`
+            );
+          }
+
+          // Show sell line if there were sells
+          if (agg.sellValue > 0) {
+            lines.push(
+              `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.red('Sell'.padEnd(6))} ` +
+              `${this.formatUsd(agg.sellValue).padStart(12)}  @${agg.avgSellPrice.toFixed(2).padStart(5)}   ` +
+              `${String(agg.fillCount).padStart(3)}    ${chalk.gray(txHash)}`
+            );
+          }
+        }
+        lines.push('');
+      }
     }
 
     // Suspicion Factors

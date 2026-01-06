@@ -67,8 +67,8 @@ describe('AccountFetcher', () => {
   });
 
   describe('with subgraph', () => {
-    // ... existing subgraph tests ...
     it('uses subgraph data when available', async () => {
+      // Mock account query
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -87,19 +87,43 @@ describe('AccountFetcher', () => {
           }),
       });
 
+      // Mock redemptions query (called in parallel)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              redemptions: [
+                { id: 'r1', timestamp: '1735948831', payout: '437957000000', condition: { id: '0xcond1' } },
+              ],
+            },
+          }),
+      });
+
       const subgraphClient = new SubgraphClient('test-key');
       const fetcher = new AccountFetcher({ subgraphClient });
       const history = await fetcher.getAccountHistory('0xwallet');
 
       expect(history!.dataSource).toBe('subgraph');
+      expect(history!.profitUsd).toBeCloseTo(409880.56, 0); // trading + redemptions
+      expect(history!.tradingProfitUsd).toBeCloseTo(-28076.44, 0);
+      expect(history!.redemptionPayoutsUsd).toBeCloseTo(437957, 0);
     });
 
     it('falls back to Data API when account not found in subgraph', async () => {
+      // Mock account query - returns null
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ data: { account: null } }),
       });
 
+      // Mock redemptions query (called in parallel, will be ignored)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { redemptions: [] } }),
+      });
+
+      // Mock Data API fallback
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () =>

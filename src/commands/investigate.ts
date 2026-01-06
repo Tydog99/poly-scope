@@ -1,12 +1,14 @@
 import type { Config } from '../config.js';
 import { AccountFetcher } from '../api/accounts.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
+import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
 import type { AccountHistory } from '../signals/types.js';
 import type { SubgraphTrade, SubgraphPosition } from '../api/types.js';
 
 export interface InvestigateOptions {
   wallet: string;
   tradeLimit?: number;
+  resolveMarkets?: boolean;
 }
 
 export interface WalletReport {
@@ -16,6 +18,7 @@ export interface WalletReport {
   recentTrades: SubgraphTrade[];
   suspicionFactors: string[];
   dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'cache';
+  resolvedMarkets?: Map<string, ResolvedToken>;
 }
 
 export class InvestigateCommand {
@@ -47,7 +50,7 @@ export class InvestigateCommand {
   }
 
   async execute(options: InvestigateOptions): Promise<WalletReport> {
-    const { wallet, tradeLimit = 20 } = options;
+    const { wallet, tradeLimit = 500, resolveMarkets = true } = options;
     const normalizedWallet = wallet.toLowerCase();
 
     // Fetch account history
@@ -71,6 +74,30 @@ export class InvestigateCommand {
       }
     }
 
+    // Resolve market names if requested
+    let resolvedMarketsMap: Map<string, ResolvedToken> | undefined;
+    if (resolveMarkets && (positions.length > 0 || recentTrades.length > 0)) {
+      // Collect all unique token IDs
+      const tokenIds = new Set<string>();
+      for (const pos of positions) {
+        if (pos.marketId) tokenIds.add(pos.marketId);
+      }
+      for (const trade of recentTrades) {
+        if (trade.marketId) tokenIds.add(trade.marketId);
+      }
+
+      if (tokenIds.size > 0) {
+        console.log(`Resolving ${tokenIds.size} market names...`);
+        const resolver = getMarketResolver();
+        resolvedMarketsMap = await resolver.resolveBatch([...tokenIds]);
+        const resolvedCount = resolvedMarketsMap.size;
+        const unresolvedCount = tokenIds.size - resolvedCount;
+        if (unresolvedCount > 0) {
+          console.log(`  Resolved ${resolvedCount}/${tokenIds.size} markets (${unresolvedCount} not found - may be archived)`);
+        }
+      }
+    }
+
     // Analyze for suspicion factors
     const suspicionFactors = this.analyzeSuspicionFactors(accountHistory, positions);
 
@@ -81,6 +108,7 @@ export class InvestigateCommand {
       recentTrades,
       suspicionFactors,
       dataSource: accountHistory?.dataSource ?? 'data-api',
+      resolvedMarkets: resolvedMarketsMap,
     };
   }
 
