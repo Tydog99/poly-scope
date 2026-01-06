@@ -309,7 +309,7 @@ docs/ (Planning documents)
 - [ ] Batch wallet investigation command
 - [ ] Export formats (JSON/CSV)
 - [ ] Watchlist support
-- [ ] **Market name resolution** - Currently shows truncated token IDs. Gamma API has 20k+ markets with no token ID lookup. Subgraph has no market metadata. Options: persistent cache, condition ID mapping, or accept truncated IDs.
+- [x] ~~**Market name resolution**~~ - Fixed! Uses Gamma API `clob_token_ids` param with repeated format.
 
 ### Advanced Features
 - [ ] Real-time monitoring mode
@@ -331,4 +331,5 @@ docs/ (Planning documents)
 | 2026-01-05 | Merged cli-updates branch into main |
 | 2026-01-05 | Implemented two-pass batch fetching to remove 50-account limit |
 | 2026-01-05 | Fixed broken Account entities by querying actual trade counts from enrichedOrderFilleds |
-| 2026-01-05 | Optimized market resolver: switched from CLOB to Gamma API, lazy loading, removed slow 60s fallback search |
+| 2026-01-05 | Optimized market resolver: switched from CLOB to Gamma API, lazy loading |
+| 2026-01-05 | Fixed market name resolution: use repeated params format for Gamma API clob_token_ids |
