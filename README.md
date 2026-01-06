@@ -340,6 +340,13 @@ Potential new signals that could improve detection accuracy:
 
 These signals would use position and trade pattern data from the subgraph to identify more sophisticated insider trading behaviors.
 
+## Useful prompt
+
+ You should catchup on @README.md @CLAUDE.md to understand the nuances of the CLOB and how polymarket order are filled, and matched. Use context7 to read up on the polymarket subgraph. These docs are critical: - [Paradigm: Polymarket Volume
+  Double-Counting](https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted) - Why volume gets inflated 2x
+  - [Zichao Yang: Decoding Polymarket Orders](https://yzc.me/x01Crypto/decoding-polymarket) - Technical deep-dive on order interpretation
+  - [Nautilus Trader Issue #3126](https://github.com/nautechsystems/nautilus_trader/issues/3126) - Side inversion bug fix
+
 ## License
 
 MIT

@@ -346,3 +346,6 @@ docs/ (Planning documents)
 | 2026-01-06 | Added `--role` flag for analyze command: taker (default), maker, or both - avoids double-counting per Paradigm research |
 | 2026-01-06 | Added Trade Data Interpretation documentation to README.md with research links |
 | 2026-01-06 | Fixed investigate `-m` market filter: now filters at GraphQL query level instead of post-fetch (was missing trades when wallet had many trades in other markets) |
+| 2026-01-06 | Enhanced investigate Recent Trades: shows both maker [M] and taker [T] fills with role indicators, marks complementary trades [C], includes breakdown in totals |
+| 2026-01-06 | Fixed complementary trade detection: now works at transaction level - when a tx has both YES/NO trades, the smaller value side is marked [C] (order routing artifact) |
+| 2026-01-06 | Exclude complementary trades from market subtotals - they're order routing artifacts, not primary intent |

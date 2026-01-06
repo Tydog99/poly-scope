@@ -872,7 +872,7 @@ describe('CLIReporter', () => {
         // Taker trade should not show as a separate line
       });
 
-      it('filters complementary YES/NO trades using position data', () => {
+      it('marks complementary YES/NO trades using position data', () => {
         const yesTokenId = '11111111111111111111';
         const noTokenId = '22222222222222222222';
         const wallet = '0x1234567890abcdef1234567890abcdef12345678';
@@ -912,18 +912,21 @@ describe('CLIReporter', () => {
 
         // Should show YES trades (wallet has YES position)
         expect(output).toContain('(Yes)');
-        // The NO token should be filtered - verify output does not show (No) for this specific trade
-        // (Note: There might still be references to NO in headers or other places)
+        // NO trades are now shown but marked as complementary
+        expect(output).toContain('(No)');
 
         // Count lines that contain market display with (Yes) vs (No)
-        // The trade line should show (Yes) because that's the position token
         const lines = output.split('\n');
         const yesMarketLines = lines.filter(l => l.includes('Test?') && l.includes('(Yes)'));
         const noMarketLines = lines.filter(l => l.includes('Test?') && l.includes('(No)'));
 
-        // There should be YES market references but no NO market references for this trade
+        // Both should be shown
         expect(yesMarketLines.length).toBeGreaterThan(0);
-        expect(noMarketLines.length).toBe(0);
+        expect(noMarketLines.length).toBeGreaterThan(0);
+
+        // The transaction has both YES and NO trades - smaller side (YES=$5k) should be marked [C]
+        // The NO side has same value ($5k) so with <= comparison, YES is marked as complementary
+        expect(output).toContain('[C]');
       });
 
       it('falls back to higher value when no position data', () => {
