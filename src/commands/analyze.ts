@@ -136,7 +136,8 @@ export class AnalyzeCommand {
       }
     }
 
-    console.log(`  Found ${candidateWallets.size} unique candidate wallets (${safeBetsFiltered} safe bets filtered)`);
+    const thresholdPct = (this.config.filters.safeBetThreshold * 100).toFixed(0);
+    console.log(`  Found ${candidateWallets.size} unique candidate wallets (${safeBetsFiltered} safe bets filtered at ≥${thresholdPct}%)`);
 
     // === PHASE 2: Batch fetch all candidate account histories ===
     console.log(`Phase 2: Fetching account histories for ${candidateWallets.size} wallets...`);
