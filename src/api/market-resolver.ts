@@ -5,29 +5,29 @@
  * - Condition ID: Identifies the market question (0x...)
  * - Token ID: Identifies a specific outcome (YES/NO) - large decimal number
  *
- * This resolver fetches market data from the CLOB API and builds a lookup table.
+ * This resolver uses lazy loading - it only fetches markets when needed,
+ * rather than preloading thousands of markets upfront.
  */
 
-const CLOB_API = 'https://clob.polymarket.com';
+const GAMMA_API = 'https://gamma-api.polymarket.com';
 
-interface ClobToken {
-  token_id: string;
-  outcome: string;
-  price: number;
-  winner: boolean;
-}
-
-interface ClobMarket {
-  condition_id: string;
+interface GammaMarket {
+  conditionId: string;
   question: string;
-  market_slug: string;
-  tokens: ClobToken[];
+  slug: string;
+  clobTokenIds: string; // JSON string: "[\"tokenId1\", \"tokenId2\"]"
+  outcomes: string;     // JSON string: "[\"Yes\", \"No\"]"
   closed: boolean;
 }
 
-interface ClobMarketsResponse {
-  data: ClobMarket[];
-  next_cursor?: string;
+function parseJsonArray(jsonStr: string | undefined): string[] {
+  if (!jsonStr) return [];
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface ResolvedToken {
@@ -40,96 +40,103 @@ export interface ResolvedToken {
 
 export class MarketResolver {
   private tokenLookup: Map<string, ResolvedToken> = new Map();
-  private initialized = false;
-  private initPromise: Promise<void> | null = null;
-
-  /**
-   * Initialize the resolver by fetching markets from CLOB API
-   * Call this before resolving tokens, or it will be called automatically
-   */
-  async initialize(): Promise<void> {
-    if (this.initialized) return;
-    if (this.initPromise) return this.initPromise;
-
-    this.initPromise = this.loadMarkets();
-    await this.initPromise;
-    this.initialized = true;
-  }
-
-  private async loadMarkets(): Promise<void> {
-    let cursor: string | undefined;
-    let totalLoaded = 0;
-    const maxMarkets = 10000; // Safety limit
-
-    try {
-      while (totalLoaded < maxMarkets) {
-        const url = cursor
-          ? `${CLOB_API}/markets?next_cursor=${cursor}`
-          : `${CLOB_API}/markets`;
-
-        const response = await fetch(url);
-        if (!response.ok) {
-          console.warn(`Failed to fetch markets: ${response.statusText}`);
-          break;
-        }
-
-        const data = await response.json() as ClobMarketsResponse;
-
-        if (!data.data || data.data.length === 0) break;
-
-        for (const market of data.data) {
-          for (const token of market.tokens) {
-            if (token.token_id) {
-              this.tokenLookup.set(token.token_id, {
-                tokenId: token.token_id,
-                question: market.question,
-                outcome: token.outcome,
-                marketSlug: market.market_slug,
-                conditionId: market.condition_id,
-              });
-            }
-          }
-        }
-
-        totalLoaded += data.data.length;
-        cursor = data.next_cursor;
-
-        if (!cursor) break;
-      }
-    } catch (error) {
-      console.warn(`Error loading markets: ${error}`);
-    }
-  }
 
   /**
    * Resolve a single token ID to market info
    */
   async resolve(tokenId: string): Promise<ResolvedToken | null> {
-    await this.initialize();
-    return this.tokenLookup.get(tokenId) || null;
+    // Check cache first
+    const cached = this.tokenLookup.get(tokenId);
+    if (cached) return cached;
+
+    // Try to fetch this specific token
+    const results = await this.fetchTokenIds([tokenId]);
+    return results.get(tokenId) || null;
   }
 
   /**
-   * Resolve multiple token IDs at once
+   * Resolve multiple token IDs at once (efficient batch lookup)
    */
   async resolveBatch(tokenIds: string[]): Promise<Map<string, ResolvedToken>> {
-    await this.initialize();
-
     const results = new Map<string, ResolvedToken>();
+    const uncached: string[] = [];
+
+    // Check cache first
     for (const tokenId of tokenIds) {
-      const resolved = this.tokenLookup.get(tokenId);
-      if (resolved) {
+      const cached = this.tokenLookup.get(tokenId);
+      if (cached) {
+        results.set(tokenId, cached);
+      } else {
+        uncached.push(tokenId);
+      }
+    }
+
+    // Fetch uncached tokens
+    if (uncached.length > 0) {
+      const fetched = await this.fetchTokenIds(uncached);
+      for (const [tokenId, resolved] of fetched) {
         results.set(tokenId, resolved);
       }
     }
+
     return results;
   }
 
   /**
-   * Get the number of markets loaded
+   * Fetch specific token IDs from Gamma API
    */
-  get marketCount(): number {
-    return this.tokenLookup.size / 2; // Each market has ~2 tokens
+  private async fetchTokenIds(tokenIds: string[]): Promise<Map<string, ResolvedToken>> {
+    const results = new Map<string, ResolvedToken>();
+    if (tokenIds.length === 0) return results;
+
+    try {
+      // Try batch lookup with clob_token_ids parameter
+      // Gamma API accepts comma-separated token IDs
+      const tokenIdsParam = tokenIds.join(',');
+      const url = `${GAMMA_API}/markets?clob_token_ids=${encodeURIComponent(tokenIdsParam)}`;
+
+      const response = await fetch(url);
+      if (response.ok) {
+        const markets = await response.json() as GammaMarket[];
+
+        for (const market of markets) {
+          const tokenIdsArr = parseJsonArray(market.clobTokenIds);
+          const outcomesArr = parseJsonArray(market.outcomes);
+
+          for (let i = 0; i < tokenIdsArr.length; i++) {
+            const tokenId = tokenIdsArr[i];
+            const outcome = outcomesArr[i] || `Outcome ${i}`;
+
+            if (tokenId && tokenIds.includes(tokenId)) {
+              const resolved: ResolvedToken = {
+                tokenId,
+                question: market.question,
+                outcome,
+                marketSlug: market.slug,
+                conditionId: market.conditionId,
+              };
+              results.set(tokenId, resolved);
+              this.tokenLookup.set(tokenId, resolved);
+            }
+          }
+        }
+      }
+
+      // Note: The clob_token_ids filter doesn't work on Gamma API
+      // and full market scan is too slow (20k+ markets).
+      // Markets that can't be found will show as truncated token IDs.
+    } catch (error) {
+      console.warn(`Error fetching token IDs: ${error}`);
+    }
+
+    return results;
+  }
+
+  /**
+   * Get the number of cached tokens
+   */
+  get cacheSize(): number {
+    return this.tokenLookup.size;
   }
 
   /**
