@@ -1,13 +1,13 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-04
+Last updated: 2026-01-05
 
 ## 1. Current Implementation - Fully Functional
 
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 66 tests passing across 13 test files
+- **Test Status**: All 77 tests passing across 14 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (2)
@@ -198,7 +198,7 @@ The subgraph client has advanced methods that aren't integrated into the main co
 
 ### Strengths
 - Clean architecture - Separation of concerns (api, signals, commands, output)
-- Comprehensive test suite - 66 tests with integration tests
+- Comprehensive test suite - 77 tests with integration tests
 - Error handling - Graceful fallbacks between data sources
 - Configuration - Flexible config system with CLI overrides
 - Documentation - Extensive README with limitations documented
@@ -243,7 +243,7 @@ The subgraph client has advanced methods that aren't integrated into the main co
 | Subgraph integration | Working | Primary data source |
 | Data API fallback | Working | With caching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 66/66 passing |
+| Test suite | Working | 77/77 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
@@ -267,6 +267,7 @@ src/
 │   ├── accounts.ts   - Account history
 │   ├── subgraph.ts   - The Graph GraphQL queries
 │   ├── slug.ts       - Market slug resolution
+│   ├── market-resolver.ts - Token ID to market name mapping
 │   ├── cache.ts      - Trade caching
 │   └── types.ts      - Type definitions
 ├── signals/          (Detection engine)
@@ -284,7 +285,7 @@ src/
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (13 test files, 66 tests)
+tests/ (14 test files, 77 tests)
 scripts/ (3 utilities)
 docs/ (Planning documents)
 ```
@@ -308,6 +309,7 @@ docs/ (Planning documents)
 - [ ] Batch wallet investigation command
 - [ ] Export formats (JSON/CSV)
 - [ ] Watchlist support
+- [ ] **Market name resolution** - Currently shows truncated token IDs. Gamma API has 20k+ markets with no token ID lookup. Subgraph has no market metadata. Options: persistent cache, condition ID mapping, or accept truncated IDs.
 
 ### Advanced Features
 - [ ] Real-time monitoring mode
@@ -329,3 +331,4 @@ docs/ (Planning documents)
 | 2026-01-05 | Merged cli-updates branch into main |
 | 2026-01-05 | Implemented two-pass batch fetching to remove 50-account limit |
 | 2026-01-05 | Fixed broken Account entities by querying actual trade counts from enrichedOrderFilleds |
+| 2026-01-05 | Optimized market resolver: switched from CLOB to Gamma API, lazy loading, removed slow 60s fallback search |
