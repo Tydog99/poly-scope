@@ -671,6 +671,81 @@ export class CLIReporter {
     }
     lines.push('');
 
+    // Suspicious Trades Analysis
+    if (report.analyzedTradeCount !== undefined) {
+      lines.push(chalk.bold(`Suspicious Trade Analysis (${report.analyzedTradeCount} trades analyzed):`));
+      lines.push(chalk.gray('Weights: Size 40% | Acct 35% | Conv 25%'));
+      lines.push('');
+
+      if (!report.suspiciousTrades || report.suspiciousTrades.length === 0) {
+        lines.push(chalk.green('  ✓ No suspicious trades detected above threshold.'));
+      } else {
+        // Table header
+        lines.push(
+          chalk.gray('  #   Score   Size   Acct   Conv   Time             Market                              Trade')
+        );
+        lines.push(chalk.gray('  ' + '─'.repeat(110)));
+
+        for (let i = 0; i < Math.min(report.suspiciousTrades.length, 20); i++) {
+          const st = report.suspiciousTrades[i];
+          lines.push(this.formatSuspiciousTradeForWallet(st, i + 1, report.resolvedMarkets));
+        }
+
+        if (report.suspiciousTrades.length > 20) {
+          lines.push(chalk.gray(`  ... and ${report.suspiciousTrades.length - 20} more suspicious trades`));
+        }
+
+        // Summary
+        lines.push('');
+        const avgScore = Math.round(
+          report.suspiciousTrades.reduce((sum, st) => sum + st.score.total, 0) / report.suspiciousTrades.length
+        );
+        const highScoreCount = report.suspiciousTrades.filter(st => st.score.total >= 80).length;
+        lines.push(
+          chalk.gray(`  Summary: ${report.suspiciousTrades.length} flagged trades, `) +
+          chalk.yellow(`${highScoreCount} high-risk (≥80), `) +
+          chalk.gray(`avg score: ${avgScore}`)
+        );
+      }
+      lines.push('');
+    }
+
     return lines.join('\n');
+  }
+
+  private formatSuspiciousTradeForWallet(
+    st: SuspiciousTrade,
+    rank: number,
+    resolvedMarkets?: Map<string, import('../api/market-resolver.js').ResolvedToken>
+  ): string {
+    const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
+
+    // Get signal scores
+    const getScore = (name: string) => st.score.signals.find(s => s.name === name)?.score ?? 0;
+    const sizeScore = getScore('tradeSize');
+    const acctScore = getScore('accountHistory');
+    const convScore = getScore('conviction');
+
+    // Format time
+    const timeStr = this.formatTime(st.trade.timestamp);
+
+    // Get market name
+    const resolved = resolvedMarkets?.get(st.trade.marketId);
+    const marketDisplay = resolved
+      ? this.truncateQuestion(resolved.question, 30) + chalk.gray(` (${resolved.outcome})`)
+      : st.trade.marketId.slice(0, 16) + '...';
+
+    const cols = [
+      String(rank).padStart(3),
+      scoreColor(String(st.score.total).padStart(3) + '/100'),
+      String(sizeScore).padStart(3) + '/100',
+      String(acctScore).padStart(3) + '/100',
+      String(convScore).padStart(3) + '/100',
+      chalk.gray(timeStr),
+      marketDisplay.padEnd(36),
+      `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
+    ];
+
+    return '  ' + cols.join('  ');
   }
 }

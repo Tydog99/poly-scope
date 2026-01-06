@@ -2,13 +2,16 @@ import type { Config } from '../config.js';
 import { AccountFetcher } from '../api/accounts.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
-import type { AccountHistory } from '../signals/types.js';
+import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
+import type { AccountHistory, Trade, SignalContext } from '../signals/types.js';
 import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption } from '../api/types.js';
+import type { SuspiciousTrade } from '../output/types.js';
 
 export interface InvestigateOptions {
   wallet: string;
   tradeLimit?: number;
   resolveMarkets?: boolean;
+  analyzeLimit?: number; // Number of trades to run through suspicious trade analysis (default: 100)
 }
 
 export interface WalletReport {
@@ -20,11 +23,15 @@ export interface WalletReport {
   suspicionFactors: string[];
   dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'cache';
   resolvedMarkets?: Map<string, ResolvedToken>;
+  suspiciousTrades?: SuspiciousTrade[]; // Trades that scored above alert threshold
+  analyzedTradeCount?: number; // How many trades were analyzed
 }
 
 export class InvestigateCommand {
   private accountFetcher: AccountFetcher;
   private subgraphClient: SubgraphClient | null;
+  private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
+  private aggregator: SignalAggregator;
 
   constructor(private config: Config) {
     // Create subgraph client if enabled and API key is available
@@ -41,6 +48,14 @@ export class InvestigateCommand {
       subgraphClient: this.subgraphClient,
     });
 
+    // Initialize signals for trade analysis
+    this.signals = [
+      new TradeSizeSignal(),
+      new AccountHistorySignal(),
+      new ConvictionSignal(),
+    ];
+    this.aggregator = new SignalAggregator(config);
+
     if (this.subgraphClient) {
       console.log('Using The Graph subgraph for wallet investigation');
     } else if (!config.subgraph.enabled) {
@@ -51,7 +66,7 @@ export class InvestigateCommand {
   }
 
   async execute(options: InvestigateOptions): Promise<WalletReport> {
-    const { wallet, tradeLimit = 500, resolveMarkets = true } = options;
+    const { wallet, tradeLimit = 500, resolveMarkets = true, analyzeLimit = 100 } = options;
     const normalizedWallet = wallet.toLowerCase();
 
     // Fetch account history
@@ -104,6 +119,50 @@ export class InvestigateCommand {
     // Analyze for suspicion factors
     const suspicionFactors = this.analyzeSuspicionFactors(accountHistory, positions);
 
+    // Run trades through suspicious trade analyzer
+    let suspiciousTrades: SuspiciousTrade[] | undefined;
+    let analyzedTradeCount: number | undefined;
+
+    if (analyzeLimit > 0 && recentTrades.length > 0 && resolvedMarketsMap) {
+      const tradesToAnalyze = recentTrades.slice(0, analyzeLimit);
+      analyzedTradeCount = tradesToAnalyze.length;
+
+      console.log(`Analyzing ${analyzedTradeCount} trades for suspicious patterns...`);
+
+      const context: SignalContext = {
+        config: this.config,
+        accountHistory: accountHistory ?? undefined,
+      };
+
+      const scoredTrades: SuspiciousTrade[] = [];
+
+      for (const subgraphTrade of tradesToAnalyze) {
+        // Convert SubgraphTrade to Trade
+        const trade = this.convertToTrade(subgraphTrade, normalizedWallet, resolvedMarketsMap);
+        if (!trade) continue; // Skip if can't resolve market
+
+        // Run through all signals
+        const results = await Promise.all(
+          this.signals.map(s => s.calculate(trade, context))
+        );
+        const score = this.aggregator.aggregate(results);
+
+        if (score.isAlert) {
+          scoredTrades.push({
+            trade,
+            score,
+            accountHistory: accountHistory ?? undefined,
+          });
+        }
+      }
+
+      // Sort by score descending
+      scoredTrades.sort((a, b) => b.score.total - a.score.total);
+      suspiciousTrades = scoredTrades;
+
+      console.log(`Found ${scoredTrades.length} suspicious trades above threshold.`);
+    }
+
     return {
       wallet: normalizedWallet,
       accountHistory,
@@ -113,6 +172,42 @@ export class InvestigateCommand {
       suspicionFactors,
       dataSource: accountHistory?.dataSource ?? 'data-api',
       resolvedMarkets: resolvedMarketsMap,
+      suspiciousTrades,
+      analyzedTradeCount,
+    };
+  }
+
+  /**
+   * Convert a SubgraphTrade to the normalized Trade type for signal analysis
+   */
+  private convertToTrade(
+    subgraphTrade: SubgraphTrade,
+    walletAddress: string,
+    resolvedMarkets: Map<string, ResolvedToken>
+  ): Trade | null {
+    const resolved = resolvedMarkets.get(subgraphTrade.marketId);
+    if (!resolved) return null; // Can't determine outcome without market resolution
+
+    // Determine wallet's actual action (maker's side matches side field, taker is opposite)
+    const isMaker = subgraphTrade.maker.toLowerCase() === walletAddress.toLowerCase();
+    const walletSide: 'BUY' | 'SELL' = isMaker
+      ? (subgraphTrade.side === 'Buy' ? 'BUY' : 'SELL')
+      : (subgraphTrade.side === 'Buy' ? 'SELL' : 'BUY');
+
+    // Parse numeric fields (6 decimals)
+    const size = parseFloat(subgraphTrade.size) / 1e6;
+    const price = parseFloat(subgraphTrade.price);
+
+    return {
+      id: subgraphTrade.id,
+      marketId: subgraphTrade.marketId,
+      wallet: walletAddress,
+      side: walletSide,
+      outcome: resolved.outcome.toUpperCase() as 'YES' | 'NO',
+      size: size / price, // Convert USD value back to shares
+      price,
+      timestamp: new Date(subgraphTrade.timestamp * 1000),
+      valueUsd: size,
     };
   }
 
