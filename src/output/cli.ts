@@ -547,18 +547,20 @@ export class CLIReporter {
         }
 
         const agg = marketTrades.get(txHash)!;
-        const size = parseFloat(trade.size) / 1e6;
+        const size = parseFloat(trade.size) / 1e6;  // size is USD value, not shares
         const price = parseFloat(trade.price);
-        const value = size * price;
+        const value = size;  // size already represents USD value
 
-        // Determine the wallet's actual action (not the maker's order side)
-        // The 'side' field represents the MAKER's order side
-        // - If wallet is maker: wallet's action matches the side
-        // - If wallet is taker: wallet's action is OPPOSITE of the side
+        // Only include trades where wallet is MAKER on the position token
+        // Taker trades are often complementary (NO token) trades from split operations
+        // Polymarket shows only maker fills on the position token
         const isMaker = trade.maker.toLowerCase() === report.wallet.toLowerCase();
-        const walletAction = isMaker
-          ? trade.side // Maker's action matches side
-          : (trade.side === 'Buy' ? 'Sell' : 'Buy'); // Taker's action is opposite
+        if (!isMaker) {
+          continue;  // Skip taker fills - they're complementary trades
+        }
+
+        // Wallet's action matches the side field when they're the maker
+        const walletAction = trade.side;
 
         if (walletAction === 'Buy') {
           agg.avgBuyPrice = (agg.avgBuyPrice * agg.buyValue + price * value) / (agg.buyValue + value || 1);
@@ -570,12 +572,15 @@ export class CLIReporter {
         agg.fillCount++;
       }
 
-      // Convert to sorted arrays
+      // Convert to sorted arrays, filtering out empty txs (no maker fills)
       const sortedMarkets = [...tradesByMarket.entries()]
         .map(([marketId, txMap]) => ({
           marketId,
-          trades: [...txMap.values()].sort((a, b) => b.timestamp - a.timestamp),
+          trades: [...txMap.values()]
+            .filter(t => t.fillCount > 0)  // Only txs with maker fills
+            .sort((a, b) => b.timestamp - a.timestamp),
         }))
+        .filter(m => m.trades.length > 0)  // Only markets with trades
         .sort((a, b) => {
           const aLatest = Math.max(...a.trades.map(t => t.timestamp));
           const bLatest = Math.max(...b.trades.map(t => t.timestamp));
@@ -601,6 +606,11 @@ export class CLIReporter {
           : chalk.gray(marketId.length > 20 ? marketId.slice(0, 10) + '...' + marketId.slice(-8) : marketId);
         lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
 
+        // Track totals for this market
+        let totalBuyValue = 0;
+        let totalSellValue = 0;
+        let totalFills = 0;
+
         // Show all aggregated trades
         for (const agg of trades) {
           const date = new Date(agg.timestamp * 1000);
@@ -619,6 +629,8 @@ export class CLIReporter {
 
           // Show buy line if there were buys
           if (agg.buyValue > 0) {
+            totalBuyValue += agg.buyValue;
+            totalFills += agg.fillCount;
             lines.push(
               `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.green('Buy'.padEnd(6))} ` +
               `${this.formatUsd(agg.buyValue).padStart(12)}  @${agg.avgBuyPrice.toFixed(2).padStart(5)}   ` +
@@ -628,12 +640,23 @@ export class CLIReporter {
 
           // Show sell line if there were sells
           if (agg.sellValue > 0) {
+            totalSellValue += agg.sellValue;
+            totalFills += agg.fillCount;
             lines.push(
               `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.red('Sell'.padEnd(6))} ` +
               `${this.formatUsd(agg.sellValue).padStart(12)}  @${agg.avgSellPrice.toFixed(2).padStart(5)}   ` +
               `${String(agg.fillCount).padStart(3)}    ${chalk.gray(txHash)}`
             );
           }
+        }
+
+        // Show market totals
+        if (totalBuyValue > 0 || totalSellValue > 0) {
+          const totals: string[] = [];
+          if (totalBuyValue > 0) totals.push(chalk.green(`Bought ${this.formatUsd(totalBuyValue)}`));
+          if (totalSellValue > 0) totals.push(chalk.red(`Sold ${this.formatUsd(totalSellValue)}`));
+          lines.push(`  ${''.padEnd(14)} ${''.padEnd(8)} ${chalk.bold('Total'.padEnd(6))} ` +
+            `${totals.join(' | ')} ${chalk.gray(`(${totalFills} fills)`)}`);
         }
         lines.push('');
       }

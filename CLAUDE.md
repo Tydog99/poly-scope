@@ -121,8 +121,8 @@ enrichedOrderFilleds(where: { market: $tokenId }) {
   taker { id }
   market { id }       # Token/Orderbook ID
   side                # "Buy" or "Sell"
-  size                # 6 decimals
-  price               # 6 decimals
+  size                # 6 decimals - USD VALUE of trade (NOT shares!)
+  price               # 0-1 decimal (e.g., 0.08 = 8 cents per share)
 }
 
 # MarketPosition (user holdings)
