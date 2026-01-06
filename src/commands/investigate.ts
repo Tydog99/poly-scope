@@ -16,6 +16,16 @@ export interface InvestigateOptions {
   market?: string; // Filter to a specific market (condition ID)
 }
 
+export interface MarketSummary {
+  marketName: string;
+  tradeCount: number;
+  volumeUsd: number;
+  positionValueUsd: number;
+  positionCount: number;
+  redeemedUsd: number;
+  isRedeemed: boolean;
+}
+
 export interface WalletReport {
   wallet: string;
   accountHistory: AccountHistory | null;
@@ -27,6 +37,7 @@ export interface WalletReport {
   resolvedMarkets?: Map<string, ResolvedToken>;
   suspiciousTrades?: SuspiciousTrade[]; // Trades that scored above alert threshold
   analyzedTradeCount?: number; // How many trades were analyzed
+  marketSummary?: MarketSummary; // Summary when filtering by specific market
 }
 
 export class InvestigateCommand {
@@ -76,16 +87,19 @@ export class InvestigateCommand {
     // If market filter specified, get its token IDs and condition ID
     let marketTokenIds: Set<string> | null = null;
     let marketConditionId: string | null = null;
+    let marketName: string | null = null;
     if (market) {
       try {
         const marketData = await this.polymarketClient.getMarket(market);
         marketTokenIds = new Set(marketData.tokens.map(t => t.tokenId.toLowerCase()));
         marketConditionId = marketData.conditionId?.toLowerCase() || market.toLowerCase();
-        console.log(`Filtering to market: ${marketData.question || market}`);
+        marketName = marketData.question || market;
+        console.log(`Filtering to market: ${marketName}`);
       } catch (error) {
         console.log(`Warning: Could not fetch market ${market}: ${error}`);
         // Use the provided market ID as condition ID fallback
         marketConditionId = market.toLowerCase();
+        marketName = market;
       }
     }
 
@@ -204,6 +218,31 @@ export class InvestigateCommand {
       console.log(`Found ${scoredTrades.length} suspicious trades above threshold.`);
     }
 
+    // Calculate market-specific summary if filtering by market
+    let marketSummary: MarketSummary | undefined;
+    if (marketName) {
+      // Calculate volume from trades (size field is already in USD with 6 decimals)
+      const volumeUsd = recentTrades.reduce((sum, t) => sum + parseFloat(t.size) / 1e6, 0);
+
+      // Calculate position value from filtered positions
+      const positionValueUsd = positions.reduce((sum, p) => {
+        return sum + Math.abs(parseFloat(p.netValue)) / 1e6;
+      }, 0);
+
+      // Calculate total redeemed amount
+      const redeemedUsd = redemptions.reduce((sum, r) => sum + parseFloat(r.payout) / 1e6, 0);
+
+      marketSummary = {
+        marketName,
+        tradeCount: recentTrades.length,
+        volumeUsd,
+        positionValueUsd,
+        positionCount: positions.length,
+        redeemedUsd,
+        isRedeemed: redemptions.length > 0,
+      };
+    }
+
     return {
       wallet: normalizedWallet,
       accountHistory,
@@ -215,6 +254,7 @@ export class InvestigateCommand {
       resolvedMarkets: resolvedMarketsMap,
       suspiciousTrades,
       analyzedTradeCount,
+      marketSummary,
     };
   }
 

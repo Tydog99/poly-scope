@@ -264,10 +264,26 @@ export class CLIReporter {
     lines.push(`Data Source: ${chalk.gray(report.dataSource)}`);
     lines.push('');
 
-    // Account History
+    // Market Summary (shown when filtering by specific market)
+    if (report.marketSummary) {
+      const ms = report.marketSummary;
+      lines.push(chalk.bold.cyan(`Market Summary: ${ms.marketName}`));
+      lines.push(`  Trades: ${ms.tradeCount.toLocaleString()} fills (${this.formatUsd(ms.volumeUsd)} volume)`);
+      lines.push(`  Position Value: ${this.formatUsd(ms.positionValueUsd)} (${ms.positionCount} tokens)`);
+
+      if (ms.isRedeemed) {
+        lines.push(`  Redemptions: ${chalk.green('+' + this.formatUsd(ms.redeemedUsd))}`);
+      } else {
+        lines.push(`  Redemptions: ${chalk.yellow('Not yet redeemed')}`);
+      }
+      lines.push('');
+    }
+
+    // Account History (labeled as Global when filtering by market)
     if (report.accountHistory) {
       const h = report.accountHistory;
-      lines.push(chalk.bold('Account History:'));
+      const historyLabel = report.marketSummary ? 'Global Account History:' : 'Account History:';
+      lines.push(chalk.bold(historyLabel));
 
       if (h.creationDate) {
         const ageDays = Math.floor(
