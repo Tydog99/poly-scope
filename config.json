@@ -17,6 +17,6 @@
   "conviction": {
     "minPositionPercent": 80
   },
-  "alertThreshold": 70,
+  "alertThreshold": 50,
   "watchlist": []
 }

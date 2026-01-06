@@ -299,9 +299,15 @@ export class CLIReporter {
           lines.push(`  Profit/Loss: ${profitColor(sign + this.formatUsd(h.profitUsd))}`);
         }
 
-        if (h.totalVolumeUsd > 0) {
-          const roi = (h.profitUsd / h.totalVolumeUsd) * 100;
-          lines.push(`  ROI: ${profitColor(sign + roi.toFixed(1) + '%')}`);
+        // Calculate cost basis from positions (sum of valueBought) for accurate ROI
+        // Cost basis = total money spent buying shares (the actual capital at risk)
+        const costBasis = report.positions.reduce((sum, pos) => {
+          return sum + parseFloat(pos.valueBought) / 1e6;
+        }, 0);
+
+        if (costBasis > 0) {
+          const roi = (h.profitUsd / costBasis) * 100;
+          lines.push(`  ROI: ${profitColor(sign + roi.toFixed(1) + '%')} ${chalk.gray(`(profit / $${Math.round(costBasis).toLocaleString()} cost basis)`)}`);
         }
       }
 
@@ -318,27 +324,97 @@ export class CLIReporter {
       lines.push('');
     }
 
-    // Positions
-    if (report.positions.length > 0) {
-      lines.push(chalk.bold(`Positions (${report.positions.length}):`));
-      for (const pos of report.positions.slice(0, 10)) {
-        const netValue = parseFloat(pos.netValue) / 1e6;
+    // Positions with P&L breakdown
+    if (report.positions.length > 0 || report.redemptions.length > 0) {
+      const posCount = report.positions.length;
+      const redemptionCount = report.redemptions.length;
+      lines.push(chalk.bold(`Positions & Realized Gains (${posCount} positions, ${redemptionCount} redemptions):`));
+      lines.push('');
+
+      // Table header
+      lines.push(
+        chalk.gray('  Market                              Cost Basis    Trading P&L      Realized       Shares')
+      );
+      lines.push(chalk.gray('  ' + '─'.repeat(95)));
+
+      // Track totals
+      let totalCostBasis = 0;
+      let totalTradingPnL = 0;
+      let totalRealized = 0;
+
+      // Build a map of redemptions by conditionId for potential matching
+      const redemptionsByCondition = new Map<string, number>();
+      for (const r of report.redemptions) {
+        const payout = parseFloat(r.payout) / 1e6;
+        redemptionsByCondition.set(r.conditionId, (redemptionsByCondition.get(r.conditionId) || 0) + payout);
+        totalRealized += payout;
+      }
+
+      // Show positions
+      for (const pos of report.positions.slice(0, 15)) {
+        const costBasis = parseFloat(pos.valueBought) / 1e6;
+        const tradingPnL = parseFloat(pos.netValue) / 1e6;
         const netQty = parseFloat(pos.netQuantity) / 1e6;
-        const valueColor = netValue >= 0 ? chalk.green : chalk.red;
+
+        totalCostBasis += costBasis;
+        totalTradingPnL += tradingPnL;
+
+        // Format values
+        const costStr = this.formatUsd(costBasis).padStart(12);
+        const pnlColor = tradingPnL >= 0 ? chalk.green : chalk.red;
+        const pnlSign = tradingPnL >= 0 ? '+' : '';
+        const pnlStr = pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12));
+        const sharesStr = netQty > 0 ? `${Math.round(netQty).toLocaleString()}` : chalk.gray('closed');
 
         // Use resolved market name if available
         const resolved = report.resolvedMarkets?.get(pos.marketId);
         const marketDisplay = resolved
-          ? this.truncateQuestion(resolved.question, 35) + ` (${resolved.outcome})`
+          ? this.truncateQuestion(resolved.question, 30) + chalk.gray(` (${resolved.outcome})`)
           : pos.marketId.slice(0, 16) + '...';
 
         lines.push(
-          `  ${chalk.cyan(marketDisplay)} ${valueColor(this.formatUsd(netValue))} (${netQty.toFixed(0)} shares)`
+          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${chalk.gray('-'.padStart(12))}    ${sharesStr}`
         );
       }
-      if (report.positions.length > 10) {
-        lines.push(chalk.gray(`  ... and ${report.positions.length - 10} more`));
+
+      if (report.positions.length > 15) {
+        lines.push(chalk.gray(`  ... and ${report.positions.length - 15} more positions`));
       }
+
+      // Show redemptions section if any
+      if (report.redemptions.length > 0) {
+        lines.push('');
+        lines.push(chalk.gray('  ' + '─'.repeat(95)));
+        lines.push(chalk.bold.green('  Redemptions (resolved market payouts):'));
+
+        for (const r of report.redemptions.slice(0, 10)) {
+          const payout = parseFloat(r.payout) / 1e6;
+          const date = new Date(r.timestamp * 1000);
+          const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+
+          lines.push(
+            `  ${chalk.gray(dateStr.padEnd(38))} ${chalk.gray('-'.padStart(12))}    ${chalk.gray('-'.padStart(12))}    ${chalk.green(('+' + this.formatUsd(payout)).padStart(12))}    ${chalk.gray(r.conditionId.slice(0, 10) + '...')}`
+          );
+        }
+
+        if (report.redemptions.length > 10) {
+          lines.push(chalk.gray(`  ... and ${report.redemptions.length - 10} more redemptions`));
+        }
+      }
+
+      // Summary totals
+      lines.push('');
+      lines.push(chalk.gray('  ' + '─'.repeat(95)));
+      const totalPnL = totalTradingPnL + totalRealized;
+      const totalColor = totalPnL >= 0 ? chalk.green : chalk.red;
+      const totalSign = totalPnL >= 0 ? '+' : '';
+      const tradingSign = totalTradingPnL >= 0 ? '+' : '';
+      const tradingColor = totalTradingPnL >= 0 ? chalk.green : chalk.red;
+
+      lines.push(
+        `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(12)))}`
+      );
+
       lines.push('');
     }
 
@@ -386,7 +462,16 @@ export class CLIReporter {
         const price = parseFloat(trade.price);
         const value = size * price;
 
-        if (trade.side === 'Buy') {
+        // Determine the wallet's actual action (not the maker's order side)
+        // The 'side' field represents the MAKER's order side
+        // - If wallet is maker: wallet's action matches the side
+        // - If wallet is taker: wallet's action is OPPOSITE of the side
+        const isMaker = trade.maker.toLowerCase() === report.wallet.toLowerCase();
+        const walletAction = isMaker
+          ? trade.side // Maker's action matches side
+          : (trade.side === 'Buy' ? 'Sell' : 'Buy'); // Taker's action is opposite
+
+        if (walletAction === 'Buy') {
           agg.avgBuyPrice = (agg.avgBuyPrice * agg.buyValue + price * value) / (agg.buyValue + value || 1);
           agg.buyValue += value;
         } else {

@@ -3,7 +3,7 @@ import { AccountFetcher } from '../api/accounts.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
 import type { AccountHistory } from '../signals/types.js';
-import type { SubgraphTrade, SubgraphPosition } from '../api/types.js';
+import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption } from '../api/types.js';
 
 export interface InvestigateOptions {
   wallet: string;
@@ -15,6 +15,7 @@ export interface WalletReport {
   wallet: string;
   accountHistory: AccountHistory | null;
   positions: SubgraphPosition[];
+  redemptions: SubgraphRedemption[];
   recentTrades: SubgraphTrade[];
   suspicionFactors: string[];
   dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'cache';
@@ -56,18 +57,20 @@ export class InvestigateCommand {
     // Fetch account history
     const accountHistory = await this.accountFetcher.getAccountHistory(normalizedWallet);
 
-    // Fetch positions and trades from subgraph if available
+    // Fetch positions, trades, and redemptions from subgraph if available
     let positions: SubgraphPosition[] = [];
     let recentTrades: SubgraphTrade[] = [];
+    let redemptions: SubgraphRedemption[] = [];
 
     if (this.subgraphClient) {
       try {
-        [positions, recentTrades] = await Promise.all([
+        [positions, recentTrades, redemptions] = await Promise.all([
           this.subgraphClient.getPositions(normalizedWallet),
           this.subgraphClient.getTradesByWallet(normalizedWallet, {
             limit: tradeLimit,
             orderDirection: 'desc',
           }),
+          this.subgraphClient.getRedemptions(normalizedWallet),
         ]);
       } catch (error) {
         console.log(`Subgraph query failed: ${error}`);
@@ -105,6 +108,7 @@ export class InvestigateCommand {
       wallet: normalizedWallet,
       accountHistory,
       positions,
+      redemptions,
       recentTrades,
       suspicionFactors,
       dataSource: accountHistory?.dataSource ?? 'data-api',
@@ -142,21 +146,29 @@ export class InvestigateCommand {
       factors.push(`Low trade count (${history.totalTrades} trades)`);
     }
 
-    // Check for high profit rate on new accounts
+    // Check for high profit rate on new accounts using cost basis
     if (
       history.profitUsd !== undefined &&
-      history.totalVolumeUsd > 0 &&
-      history.creationDate
+      history.creationDate &&
+      positions.length > 0
     ) {
       const ageDays = Math.floor(
         (Date.now() - history.creationDate.getTime()) / (1000 * 60 * 60 * 24)
       );
-      const profitRate = history.profitUsd / history.totalVolumeUsd;
 
-      if (ageDays < 30 && profitRate > 0.3) {
-        factors.push(
-          `High profit rate on new account (${(profitRate * 100).toFixed(1)}% return in ${ageDays} days)`
-        );
+      // Calculate cost basis from positions (sum of valueBought)
+      const costBasis = positions.reduce((sum, pos) => {
+        return sum + Math.abs(parseFloat(pos.valueBought)) / 1e6;
+      }, 0);
+
+      if (costBasis > 0) {
+        const roi = (history.profitUsd / costBasis) * 100;
+
+        if (ageDays < 30 && roi > 50) {
+          factors.push(
+            `High ROI on new account (${roi.toFixed(1)}% return in ${ageDays} days)`
+          );
+        }
       }
     }
 

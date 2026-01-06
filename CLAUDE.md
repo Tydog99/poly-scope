@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A TypeScript CLI tool that detects potential insider trading on Polymarket by scoring trades based on size/impact, account history, and directional conviction.
 
+## MCP
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+
+## Git
+
+Before each commit look to update PROJECT_STATUS.md to reflect the current state of the project.
+
 ## Commands
 
 ```bash
@@ -133,3 +141,70 @@ marketPositions(where: { user_: { id: $wallet } }) {
 - `UserPosition.realizedPnl` - Realized P&L per position
 - `Orderbook` - Per-token trade counts and volume aggregates
 - `FpmmTransaction.outcomeIndex` - Maps trades to YES/NO outcomes
+
+## Polymarket Order Book (CLOB)
+
+Polymarket uses a hybrid-decentralized Central Limit Order Book (CLOB). Orders are matched off-chain by an operator, with settlement executed on-chain via signed order messages.
+
+### Binary Outcome Tokens
+
+Each market condition has TWO tokens:
+- **YES token** - Pays $1 if outcome is YES, $0 if NO
+- **NO token** - Pays $1 if outcome is NO, $0 if YES
+
+Token prices are complementary: `YES_price + NO_price ≈ $1.00`
+
+Example: If YES trades at $0.08, NO trades at ~$0.92
+
+**Token operations:**
+- **Split**: $1000 USDC → 1000 YES + 1000 NO tokens
+- **Merge**: 1000 YES + 1000 NO → $1000 USDC
+- **Redeem**: After resolution, winning tokens → USDC (1:1)
+
+### Order Matching & Side Field
+
+**CRITICAL**: The `side` field in `EnrichedOrderFilled` represents the **MAKER's order side**, not the taker's action.
+
+| Maker's Order | Taker's Action | Economic Effect for Taker |
+|---------------|----------------|---------------------------|
+| `side: "Sell"` on YES token | Taker BUYS YES | Betting YES will win |
+| `side: "Buy"` on YES token | Taker SELLS YES | Betting NO will win |
+| `side: "Sell"` on NO token | Taker BUYS NO | Betting NO will win |
+| `side: "Buy"` on NO token | Taker SELLS NO | Betting YES will win |
+
+**Economic equivalences:**
+- Buying YES @ $0.08 ≡ Selling NO @ $0.92 (both bet YES wins)
+- Buying NO @ $0.92 ≡ Selling YES @ $0.08 (both bet NO wins)
+
+### Interpreting Trades for a Wallet
+
+When analyzing trades for a specific wallet, determine their actual action:
+
+```typescript
+// Determine the wallet's actual action
+function getWalletAction(trade: SubgraphTrade, walletAddress: string): 'BUY' | 'SELL' {
+  const isMaker = trade.maker.toLowerCase() === walletAddress.toLowerCase();
+
+  if (isMaker) {
+    // Maker's action matches the side field
+    return trade.side === 'Buy' ? 'BUY' : 'SELL';
+  } else {
+    // Taker's action is OPPOSITE of the side field
+    return trade.side === 'Buy' ? 'SELL' : 'BUY';
+  }
+}
+```
+
+### Token ID to Outcome Mapping
+
+Each condition has two token IDs. The Gamma API returns them in order: `[YES_token_id, NO_token_id]`
+
+```bash
+# Get token IDs for a market
+curl "https://gamma-api.polymarket.com/markets?clob_token_ids=<token_id>" | jq '.[] | {question, tokens: .clobTokenIds}'
+# Returns: {"tokens": "[\"YES_TOKEN_ID\", \"NO_TOKEN_ID\"]"}
+```
+
+To determine if a token is YES or NO:
+1. Query Gamma API with the token ID
+2. Compare position in the `clobTokenIds` array (index 0 = YES, index 1 = NO)

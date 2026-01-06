@@ -333,3 +333,6 @@ docs/ (Planning documents)
 | 2026-01-05 | Fixed broken Account entities by querying actual trade counts from enrichedOrderFilleds |
 | 2026-01-05 | Optimized market resolver: switched from CLOB to Gamma API, lazy loading |
 | 2026-01-05 | Fixed market name resolution: use repeated params format for Gamma API clob_token_ids |
+| 2026-01-05 | Enhanced investigate output: P&L table with cost basis, trading P&L, realized gains, redemptions |
+| 2026-01-05 | Fixed wallet action determination (maker vs taker side interpretation) |
+| 2026-01-05 | Added CLOB documentation to CLAUDE.md |
