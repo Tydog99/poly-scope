@@ -16,6 +16,11 @@ const WALLET_COLORS: ChalkInstance[] = [
   chalk.redBright,
 ];
 
+// Display limits for report sections
+const MAX_POSITIONS_DISPLAY = 15;
+const MAX_REDEMPTIONS_DISPLAY = 10;
+const MAX_SUSPICIOUS_TRADES_DISPLAY = 20;
+
 interface WalletStats {
   count: number;
   totalVolume: number;
@@ -351,7 +356,7 @@ export class CLIReporter {
       }
 
       // Show positions
-      for (const pos of report.positions.slice(0, 15)) {
+      for (const pos of report.positions.slice(0, MAX_POSITIONS_DISPLAY)) {
         const costBasis = parseFloat(pos.valueBought) / 1e6;
         const tradingPnL = parseFloat(pos.netValue) / 1e6;
         const netQty = parseFloat(pos.netQuantity) / 1e6;
@@ -377,8 +382,8 @@ export class CLIReporter {
         );
       }
 
-      if (report.positions.length > 15) {
-        lines.push(chalk.gray(`  ... and ${report.positions.length - 15} more positions`));
+      if (report.positions.length > MAX_POSITIONS_DISPLAY) {
+        lines.push(chalk.gray(`  ... and ${report.positions.length - MAX_POSITIONS_DISPLAY} more positions`));
       }
 
       // Show redemptions section if any
@@ -387,7 +392,7 @@ export class CLIReporter {
         lines.push(chalk.gray('  ' + '─'.repeat(95)));
         lines.push(chalk.bold.green('  Redemptions (resolved market payouts):'));
 
-        for (const r of report.redemptions.slice(0, 10)) {
+        for (const r of report.redemptions.slice(0, MAX_REDEMPTIONS_DISPLAY)) {
           const payout = parseFloat(r.payout) / 1e6;
           const date = new Date(r.timestamp * 1000);
           const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
@@ -397,8 +402,8 @@ export class CLIReporter {
           );
         }
 
-        if (report.redemptions.length > 10) {
-          lines.push(chalk.gray(`  ... and ${report.redemptions.length - 10} more redemptions`));
+        if (report.redemptions.length > MAX_REDEMPTIONS_DISPLAY) {
+          lines.push(chalk.gray(`  ... and ${report.redemptions.length - MAX_REDEMPTIONS_DISPLAY} more redemptions`));
         }
       }
 
@@ -627,10 +632,12 @@ export class CLIReporter {
             hour12: false,
           });
 
+          // Track fills once per aggregated trade (not per buy/sell line)
+          totalFills += agg.fillCount;
+
           // Show buy line if there were buys
           if (agg.buyValue > 0) {
             totalBuyValue += agg.buyValue;
-            totalFills += agg.fillCount;
             lines.push(
               `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.green('Buy'.padEnd(6))} ` +
               `${this.formatUsd(agg.buyValue).padStart(12)}  @${agg.avgBuyPrice.toFixed(2).padStart(5)}   ` +
@@ -641,7 +648,6 @@ export class CLIReporter {
           // Show sell line if there were sells
           if (agg.sellValue > 0) {
             totalSellValue += agg.sellValue;
-            totalFills += agg.fillCount;
             lines.push(
               `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${chalk.red('Sell'.padEnd(6))} ` +
               `${this.formatUsd(agg.sellValue).padStart(12)}  @${agg.avgSellPrice.toFixed(2).padStart(5)}   ` +
@@ -686,13 +692,13 @@ export class CLIReporter {
         );
         lines.push(chalk.gray('  ' + '─'.repeat(110)));
 
-        for (let i = 0; i < Math.min(report.suspiciousTrades.length, 20); i++) {
+        for (let i = 0; i < Math.min(report.suspiciousTrades.length, MAX_SUSPICIOUS_TRADES_DISPLAY); i++) {
           const st = report.suspiciousTrades[i];
           lines.push(this.formatSuspiciousTradeForWallet(st, i + 1, report.resolvedMarkets));
         }
 
-        if (report.suspiciousTrades.length > 20) {
-          lines.push(chalk.gray(`  ... and ${report.suspiciousTrades.length - 20} more suspicious trades`));
+        if (report.suspiciousTrades.length > MAX_SUSPICIOUS_TRADES_DISPLAY) {
+          lines.push(chalk.gray(`  ... and ${report.suspiciousTrades.length - MAX_SUSPICIOUS_TRADES_DISPLAY} more suspicious trades`));
         }
 
         // Summary
