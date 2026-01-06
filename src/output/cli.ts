@@ -434,10 +434,99 @@ export class CLIReporter {
         fillCount: number;
       }
 
-      const tradesByMarket = new Map<string, Map<string, AggregatedTrade>>();
+      // Step 1: Filter complementary trades using value-based selection
+      // Group by (txHash, conditionKey) and keep only the higher-value token side
+      interface TxConditionGroup {
+        yesFills: typeof report.recentTrades;
+        noFills: typeof report.recentTrades;
+      }
+      const txConditionGroups = new Map<string, TxConditionGroup>();
 
       for (const trade of report.recentTrades) {
+        const resolved = report.resolvedMarkets?.get(trade.marketId);
+        if (!resolved) {
+          // Can't determine YES/NO - will include later
+          continue;
+        }
+
+        // Use question as the condition key (same question = same condition)
+        const conditionKey = resolved.question;
+        const groupKey = `${trade.transactionHash}|${conditionKey}`;
+
+        if (!txConditionGroups.has(groupKey)) {
+          txConditionGroups.set(groupKey, { yesFills: [], noFills: [] });
+        }
+
+        const group = txConditionGroups.get(groupKey)!;
+        if (resolved.outcome === 'Yes') {
+          group.yesFills.push(trade);
+        } else {
+          group.noFills.push(trade);
+        }
+      }
+
+      // Build a set of token IDs the wallet has positions in
+      // This helps determine which token (YES or NO) the user actually trades
+      const positionTokenIds = new Set<string>();
+      for (const pos of report.positions) {
+        positionTokenIds.add(pos.marketId);
+      }
+
+      // Select which token side to show based on position data
+      // If wallet has a position on a token, trades on that token are their intent
+      const filteredTrades: typeof report.recentTrades = [];
+      for (const group of txConditionGroups.values()) {
+        // If only one side has trades, keep it
+        if (group.yesFills.length === 0) {
+          filteredTrades.push(...group.noFills);
+          continue;
+        }
+        if (group.noFills.length === 0) {
+          filteredTrades.push(...group.yesFills);
+          continue;
+        }
+
+        // Both sides have trades - check which token the wallet has a position in
+        const yesTokenId = group.yesFills[0]?.marketId;
+        const noTokenId = group.noFills[0]?.marketId;
+
+        const hasYesPosition = yesTokenId && positionTokenIds.has(yesTokenId);
+        const hasNoPosition = noTokenId && positionTokenIds.has(noTokenId);
+
+        if (hasYesPosition && !hasNoPosition) {
+          // Wallet has YES position - show YES trades
+          filteredTrades.push(...group.yesFills);
+        } else if (hasNoPosition && !hasYesPosition) {
+          // Wallet has NO position - show NO trades
+          filteredTrades.push(...group.noFills);
+        } else {
+          // Either both or neither - fall back to showing the higher-value side
+          const yesValue = group.yesFills.reduce((sum, t) =>
+            sum + (parseFloat(t.size) / 1e6) * parseFloat(t.price), 0);
+          const noValue = group.noFills.reduce((sum, t) =>
+            sum + (parseFloat(t.size) / 1e6) * parseFloat(t.price), 0);
+
+          if (yesValue >= noValue) {
+            filteredTrades.push(...group.yesFills);
+          } else {
+            filteredTrades.push(...group.noFills);
+          }
+        }
+      }
+
+      // Also include unresolved trades (can't determine YES/NO)
+      for (const trade of report.recentTrades) {
+        if (!report.resolvedMarkets?.has(trade.marketId)) {
+          filteredTrades.push(trade);
+        }
+      }
+
+      const tradesByMarket = new Map<string, Map<string, AggregatedTrade>>();
+
+      // Step 2: Aggregate filtered trades by market and transaction
+      for (const trade of filteredTrades) {
         const marketId = trade.marketId || 'unknown';
+
         if (!tradesByMarket.has(marketId)) {
           tradesByMarket.set(marketId, new Map());
         }

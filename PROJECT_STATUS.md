@@ -301,6 +301,7 @@ docs/ (Planning documents)
 - [x] ~~Decide on `scripts/test-subgraph.ts`~~ - deleted
 - [x] ~~Remove unused `src/api/auth.ts`~~ - deleted
 - [ ] Integrate unused subgraph queries into commands
+- [ ] Create test transactions for SELLING YES/NO both high value and low value shares (to verify complementary token filtering)
 
 ### Feature Additions
 - [ ] Cross-Market Correlation signal
@@ -336,3 +337,4 @@ docs/ (Planning documents)
 | 2026-01-05 | Enhanced investigate output: P&L table with cost basis, trading P&L, realized gains, redemptions |
 | 2026-01-05 | Fixed wallet action determination (maker vs taker side interpretation) |
 | 2026-01-05 | Added CLOB documentation to CLAUDE.md |
+| 2026-01-05 | Fixed complementary token filtering: uses position data to show YES or NO trades based on wallet holdings |
