@@ -262,22 +262,10 @@ export class CLIReporter {
     lines.push('');
     lines.push(`Wallet: ${chalk.cyan(report.wallet)}`);
     lines.push(`Data Source: ${chalk.gray(report.dataSource)}`);
-    lines.push('');
-
-    // Market Summary (shown when filtering by specific market)
     if (report.marketSummary) {
-      const ms = report.marketSummary;
-      lines.push(chalk.bold.cyan(`Market Summary: ${ms.marketName}`));
-      lines.push(`  Trades: ${ms.tradeCount.toLocaleString()} fills (${this.formatUsd(ms.volumeUsd)} volume)`);
-      lines.push(`  Position Value: ${this.formatUsd(ms.positionValueUsd)} (${ms.positionCount} tokens)`);
-
-      if (ms.isRedeemed) {
-        lines.push(`  Redemptions: ${chalk.green('+' + this.formatUsd(ms.redeemedUsd))}`);
-      } else {
-        lines.push(`  Redemptions: ${chalk.yellow('Not yet redeemed')}`);
-      }
-      lines.push('');
+      lines.push(`Market: ${chalk.cyan(report.marketSummary.marketName)}`);
     }
+    lines.push('');
 
     // Account History (labeled as Global when filtering by market)
     if (report.accountHistory) {
@@ -342,6 +330,21 @@ export class CLIReporter {
       lines.push('');
     } else {
       lines.push(chalk.yellow('No account history found'));
+      lines.push('');
+    }
+
+    // Market Summary (shown after Account History when filtering by specific market)
+    if (report.marketSummary) {
+      const ms = report.marketSummary;
+      lines.push(chalk.bold('Market Summary:'));
+      lines.push(`  Trades: ${ms.tradeCount.toLocaleString()} fills (${this.formatUsd(ms.volumeUsd)} volume)`);
+      lines.push(`  Position Value: ${this.formatUsd(ms.positionValueUsd)} (${ms.positionCount} tokens)`);
+
+      if (ms.isRedeemed) {
+        lines.push(`  Redemptions: ${chalk.green('+' + this.formatUsd(ms.redeemedUsd))}`);
+      } else {
+        lines.push(`  Redemptions: ${chalk.yellow('Not yet redeemed')}`);
+      }
       lines.push('');
     }
 
