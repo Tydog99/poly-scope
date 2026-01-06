@@ -29,6 +29,7 @@ program
   .option('--threshold <score>', 'Override alert threshold', parseFloat)
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
   .option('--cache-account-lookup', 'Cache account history lookups')
+  .option('--role <taker|maker|both>', 'Filter trades by participant role (default: taker to avoid double-counting)')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
 
@@ -67,6 +68,7 @@ program
           outcome: opts.outcome?.toUpperCase() as 'YES' | 'NO' | undefined,
           maxTrades: opts.maxTrades,
           topN: opts.top,
+          role: opts.role as 'taker' | 'maker' | 'both' | undefined,
         });
 
         console.log(reporter.formatAnalysisReport(report));

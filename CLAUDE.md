@@ -195,6 +195,24 @@ function getWalletAction(trade: SubgraphTrade, walletAddress: string): 'BUY' | '
 }
 ```
 
+### Avoiding Double-Counting: Role Filtering
+
+**IMPORTANT**: Each trade generates fills for both maker and taker. Naively summing all OrderFilled events inflates volume by ~2x.
+
+**Solution**: Use one-sided analysis:
+- `--role taker` (default for `analyze` command) - Takers hit the orderbook with urgency
+- `--role maker` - Alternative perspective for passive order analysis
+- `--role both` - Includes both (may double-count, use for wallet investigation)
+
+The `analyze` command defaults to **taker-only** to avoid double-counting and because takers are more likely to show insider behavior (urgent market orders vs passive limit orders).
+
+The `investigate` command uses **both** roles since we want to see all activity for a specific wallet.
+
+**Key Resources**:
+- [Paradigm: Polymarket Volume Double-Counting](https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted)
+- [Zichao Yang: Decoding Polymarket Orders](https://yzc.me/x01Crypto/decoding-polymarket)
+- [Nautilus Trader Issue #3126](https://github.com/nautechsystems/nautilus_trader/issues/3126) - Side inversion bug fix
+
 ### Token ID to Outcome Mapping
 
 Each condition has two token IDs. The Gamma API returns them in order: `[YES_token_id, NO_token_id]`

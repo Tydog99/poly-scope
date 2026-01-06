@@ -341,3 +341,6 @@ docs/ (Planning documents)
 | 2026-01-05 | Added CLOB documentation to CLAUDE.md |
 | 2026-01-05 | Fixed complementary token filtering: uses position data to show YES or NO trades based on wallet holdings |
 | 2026-01-06 | Enhanced investigate: runs wallet trades through 3-signal suspicious trade analyzer with `--analyze-limit` flag |
+| 2026-01-06 | Fixed trade side interpretation bug: now properly inverts `side` field for takers (was using maker's side directly) |
+| 2026-01-06 | Added `--role` flag for analyze command: taker (default), maker, or both - avoids double-counting per Paradigm research |
+| 2026-01-06 | Added Trade Data Interpretation documentation to README.md with research links |

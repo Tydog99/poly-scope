@@ -28,6 +28,14 @@ export interface GetTradesOptions {
   outcome?: 'YES' | 'NO';
   maxTrades?: number;
   allowDataApiFallback?: boolean; // Default true - set false to use subgraph only
+  /**
+   * Filter trades by participant role to avoid double-counting.
+   * - 'taker': Only trades where the wallet is the taker (default, recommended for insider detection)
+   * - 'maker': Only trades where the wallet is the maker
+   * - 'both': Include both maker and taker trades (may double-count volume)
+   * See: https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted
+   */
+  role?: 'taker' | 'maker' | 'both';
 }
 
 export class TradeFetcher {
@@ -183,18 +191,31 @@ export class TradeFetcher {
     allSubgraphTrades.sort((a, b) => b.timestamp - a.timestamp);
     const limitedTrades = allSubgraphTrades.slice(0, totalLimit);
 
-    // Convert to Trade type
-    return limitedTrades.map((st) => this.convertSubgraphTrade(st, marketId, tokenToOutcome));
+    // Convert to Trade type with role filtering (default: taker-only to avoid double-counting)
+    const roleFilter = options.role ?? 'taker';
+    const trades = limitedTrades
+      .map((st) => this.convertSubgraphTrade(st, marketId, tokenToOutcome, roleFilter))
+      .filter((t): t is Trade => t !== null);
+
+    return trades;
   }
 
   /**
-   * Convert a subgraph trade to our internal Trade type
+   * Convert a subgraph trade to our internal Trade type.
+   *
+   * IMPORTANT: The `side` field in EnrichedOrderFilled is the MAKER's order side,
+   * not the taker's action. To interpret correctly:
+   * - If wallet is maker: side is correct as-is
+   * - If wallet is taker: side must be INVERTED (taker fills opposite side)
+   *
+   * See: https://yzc.me/x01Crypto/decoding-polymarket
    */
   private convertSubgraphTrade(
     st: SubgraphTrade,
     conditionId: string,
-    tokenToOutcome: Map<string, 'YES' | 'NO'>
-  ): Trade {
+    tokenToOutcome: Map<string, 'YES' | 'NO'>,
+    roleFilter: 'taker' | 'maker' | 'both'
+  ): Trade | null {
     // In subgraph: size is USD value (6 decimals), price is already a decimal string
     const valueUsd = parseFloat(st.size) / 1e6;
     const price = parseFloat(st.price); // Already 0-1 range, not 6 decimals
@@ -204,21 +225,55 @@ export class TradeFetcher {
     // Determine outcome from token ID
     const outcome = tokenToOutcome.get(st.marketId.toLowerCase()) ?? 'YES';
 
-    // The taker is the one initiating the trade (who we're analyzing)
-    // Side represents the taker's action (Buy = buying from maker's sell order)
-    const wallet = st.taker || st.maker;
-    const side = st.side === 'Buy' ? 'BUY' : 'SELL';
+    // Determine which wallet to attribute this trade to based on role filter
+    let wallet: string;
+    let role: 'maker' | 'taker';
+    let side: 'BUY' | 'SELL';
+
+    if (roleFilter === 'taker') {
+      // Taker-only: skip if no taker
+      if (!st.taker) return null;
+      wallet = st.taker;
+      role = 'taker';
+      // Taker's action is OPPOSITE of maker's side field
+      // If maker's side is 'Buy', taker is SELLING to the maker
+      // If maker's side is 'Sell', taker is BUYING from the maker
+      side = st.side === 'Buy' ? 'SELL' : 'BUY';
+    } else if (roleFilter === 'maker') {
+      // Maker-only: skip if no maker
+      if (!st.maker) return null;
+      wallet = st.maker;
+      role = 'maker';
+      // Maker's action matches the side field directly
+      side = st.side === 'Buy' ? 'BUY' : 'SELL';
+    } else {
+      // 'both' - prefer taker (more relevant for insider detection), fall back to maker
+      if (st.taker) {
+        wallet = st.taker;
+        role = 'taker';
+        side = st.side === 'Buy' ? 'SELL' : 'BUY';
+      } else if (st.maker) {
+        wallet = st.maker;
+        role = 'maker';
+        side = st.side === 'Buy' ? 'BUY' : 'SELL';
+      } else {
+        return null; // No wallet info
+      }
+    }
 
     return {
       id: st.transactionHash,
       marketId: conditionId,
       wallet,
-      side: side as 'BUY' | 'SELL',
+      side,
       outcome,
       size,
       price,
       timestamp: new Date(st.timestamp * 1000),
       valueUsd,
+      maker: st.maker,
+      taker: st.taker,
+      role,
     };
   }
 

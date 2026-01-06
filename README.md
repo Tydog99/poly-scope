@@ -215,6 +215,63 @@ The tool implements a multi-tier data fetching strategy:
 THE_GRAPH_API_KEY=your_api_key_here
 ```
 
+## Trade Data Interpretation
+
+Understanding Polymarket trade data requires careful interpretation of the `side` field and awareness of double-counting issues.
+
+### CLOB vs AMM (FPMM) Trades
+
+Polymarket uses two trading mechanisms:
+
+| Mechanism | Volume | Entity | Has Outcome Field? |
+|-----------|--------|--------|-------------------|
+| **CLOB** (Central Limit Order Book) | ~99% | `EnrichedOrderFilled` | No (token ID only) |
+| **AMM/FPMM** (Fixed Product Market Maker) | ~1% | `FpmmTransaction` | Yes (`outcomeIndex`) |
+
+Most trades go through the CLOB, where orders are matched off-chain and settled on-chain. AMM pools exist for bootstrapping markets and small trades when orderbook liquidity is thin.
+
+### The `side` Field Problem
+
+**Critical**: The `side` field in `EnrichedOrderFilled` represents the **maker's order side**, NOT the taker's action.
+
+| Scenario | `side` Field | Taker's Actual Action |
+|----------|--------------|----------------------|
+| Maker had a SELL order | `"Sell"` | Taker is BUYING |
+| Maker had a BUY order | `"Buy"` | Taker is SELLING |
+
+To correctly interpret a trade for a specific wallet:
+
+```typescript
+const isMaker = wallet.toLowerCase() === trade.maker.toLowerCase();
+const walletSide = isMaker
+  ? (trade.side === 'Buy' ? 'BUY' : 'SELL')     // Maker: side is correct
+  : (trade.side === 'Buy' ? 'SELL' : 'BUY');    // Taker: invert the side
+```
+
+### Double-Counting Volume
+
+Each Polymarket trade generates fills for **both** maker and taker. Naively summing all `OrderFilled` events inflates volume by ~2x.
+
+**Recommendation**: Use one-sided analysis:
+- **Taker-only** (recommended for insider detection) - Takers hit the orderbook with urgency
+- **Maker-only** - Alternative perspective
+
+See: [Paradigm: Polymarket Volume Is Being Double-Counted](https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted)
+
+### YES/NO Outcome Determination
+
+The outcome (YES vs NO) is determined by which token is being traded, NOT by the `side` field:
+
+1. Each market has two token IDs: `[YES_token_id, NO_token_id]`
+2. Query Gamma API to map token ID to outcome: `GET /markets?clob_token_ids=<token_id>`
+3. Token at index 0 = YES, index 1 = NO
+
+### Key Resources
+
+- [Paradigm: Polymarket Volume Double-Counting](https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted) - Why volume gets inflated 2x
+- [Zichao Yang: Decoding Polymarket Orders](https://yzc.me/x01Crypto/decoding-polymarket) - Technical deep-dive on order interpretation
+- [Nautilus Trader Issue #3126](https://github.com/nautechsystems/nautilus_trader/issues/3126) - Side inversion bug fix
+
 ## Known Cases
 
 ### Venezuela Market Insider Trading (Jan 2026)

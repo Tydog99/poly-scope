@@ -15,6 +15,13 @@ export interface AnalyzeOptions {
   outcome?: 'YES' | 'NO';
   maxTrades?: number;
   topN?: number;
+  /**
+   * Filter trades by participant role.
+   * - 'taker': Only taker trades (default, recommended for insider detection)
+   * - 'maker': Only maker trades
+   * - 'both': Include both (may double-count volume)
+   */
+  role?: 'taker' | 'maker' | 'both';
 }
 
 export class AnalyzeCommand {
@@ -59,11 +66,14 @@ export class AnalyzeCommand {
     const market = await this.client.getMarket(options.marketId);
 
     // 2. Fetch all trades (uses subgraph as primary if available)
+    // Default to config tradeRole, allow override from options
+    const role = options.role ?? this.config.tradeRole;
     const allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
       market, // Pass market for subgraph token IDs
       after: options.after,
       before: options.before,
       maxTrades: options.maxTrades,
+      role,
     });
 
     // 3. Filter trades

@@ -33,6 +33,10 @@ export interface Trade {
   price: number; // 0-1
   timestamp: Date;
   valueUsd: number; // size * price
+  // Role info for maker/taker filtering (from subgraph data)
+  maker?: string; // Maker wallet address
+  taker?: string; // Taker wallet address
+  role?: 'maker' | 'taker'; // Which role the wallet played in this trade
 }
 
 export interface AccountHistory {

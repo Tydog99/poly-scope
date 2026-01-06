@@ -194,10 +194,15 @@ describe('TradeFetcher', () => {
       expect(trades[0].id).toBe('0xsubgraph_tx');
       expect(trades[0].wallet).toBe('0xtaker');
       expect(trades[0].outcome).toBe('YES');
-      expect(trades[0].side).toBe('BUY');
+      // Taker's action is OPPOSITE of maker's side.
+      // Maker side = 'Buy' means taker is SELLING to fill the maker's buy order.
+      expect(trades[0].side).toBe('SELL');
       expect(trades[0].size).toBe(1000); // 500 USD / 0.5 price = 1000 shares
       expect(trades[0].price).toBe(0.5);
       expect(trades[0].valueUsd).toBe(500); // 500 USD
+      expect(trades[0].role).toBe('taker'); // Default role filter is 'taker'
+      expect(trades[0].maker).toBe('0xmaker');
+      expect(trades[0].taker).toBe('0xtaker');
     });
 
     it('falls back to Data API when subgraph fails', async () => {
