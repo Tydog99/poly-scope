@@ -197,6 +197,108 @@ describe('SubgraphClient', () => {
       // Should only have one trade, not two
       expect(trades).toHaveLength(1);
     });
+
+    it('filters trades by marketIds when provided', async () => {
+      // Mock maker trades response
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              enrichedOrderFilleds: [
+                {
+                  id: 'trade1',
+                  transactionHash: '0xtx1',
+                  timestamp: '1735948800',
+                  maker: { id: '0xwallet' },
+                  taker: { id: '0xother' },
+                  market: { id: '0xtoken_yes' },
+                  side: 'Buy',
+                  size: '1000000000',
+                  price: '500000',
+                },
+              ],
+            },
+          }),
+      });
+
+      // Mock taker trades response
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: {
+              enrichedOrderFilleds: [
+                {
+                  id: 'trade2',
+                  transactionHash: '0xtx2',
+                  timestamp: '1735948900',
+                  maker: { id: '0xother' },
+                  taker: { id: '0xwallet' },
+                  market: { id: '0xtoken_no' },
+                  side: 'Sell',
+                  size: '2000000000',
+                  price: '600000',
+                },
+              ],
+            },
+          }),
+      });
+
+      const trades = await client.getTradesByWallet('0xwallet', {
+        marketIds: ['0xtoken_yes', '0xtoken_no'],
+      });
+
+      expect(trades).toHaveLength(2);
+
+      // Verify both calls include market_in filter
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      const makerCallBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(makerCallBody.variables).toHaveProperty('marketIds', ['0xtoken_yes', '0xtoken_no']);
+      expect(makerCallBody.query).toContain('market_in: $marketIds');
+      expect(makerCallBody.query).toContain('$marketIds: [String!]!');
+
+      const takerCallBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+      expect(takerCallBody.variables).toHaveProperty('marketIds', ['0xtoken_yes', '0xtoken_no']);
+      expect(takerCallBody.query).toContain('market_in: $marketIds');
+    });
+
+    it('normalizes marketIds to lowercase', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { enrichedOrderFilleds: [] } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { enrichedOrderFilleds: [] } }),
+      });
+
+      await client.getTradesByWallet('0xwallet', {
+        marketIds: ['0xTOKEN_YES', '0xTOKEN_NO'],
+      });
+
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.variables.marketIds).toEqual(['0xtoken_yes', '0xtoken_no']);
+    });
+
+    it('does not include market_in filter when marketIds not provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { enrichedOrderFilleds: [] } }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { enrichedOrderFilleds: [] } }),
+      });
+
+      await client.getTradesByWallet('0xwallet');
+
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.variables).not.toHaveProperty('marketIds');
+      expect(callBody.query).not.toContain('market_in');
+      expect(callBody.query).not.toContain('$marketIds');
+    });
   });
 
   describe('getTradesByMarket', () => {

@@ -1,5 +1,6 @@
 import type { Config } from '../config.js';
 import { AccountFetcher } from '../api/accounts.js';
+import { PolymarketClient } from '../api/client.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
@@ -12,6 +13,7 @@ export interface InvestigateOptions {
   tradeLimit?: number;
   resolveMarkets?: boolean;
   analyzeLimit?: number; // Number of trades to run through suspicious trade analysis (default: 100)
+  market?: string; // Filter to a specific market (condition ID)
 }
 
 export interface WalletReport {
@@ -29,11 +31,13 @@ export interface WalletReport {
 
 export class InvestigateCommand {
   private accountFetcher: AccountFetcher;
+  private polymarketClient: PolymarketClient;
   private subgraphClient: SubgraphClient | null;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
 
   constructor(private config: Config) {
+    this.polymarketClient = new PolymarketClient();
     // Create subgraph client if enabled and API key is available
     if (config.subgraph.enabled) {
       this.subgraphClient = createSubgraphClient({
@@ -66,8 +70,21 @@ export class InvestigateCommand {
   }
 
   async execute(options: InvestigateOptions): Promise<WalletReport> {
-    const { wallet, tradeLimit = 500, resolveMarkets = true, analyzeLimit = 100 } = options;
+    const { wallet, tradeLimit = 500, resolveMarkets = true, analyzeLimit = 100, market } = options;
     const normalizedWallet = wallet.toLowerCase();
+
+    // If market filter specified, get its token IDs
+    let marketTokenIds: Set<string> | null = null;
+    if (market) {
+      try {
+        const marketData = await this.polymarketClient.getMarket(market);
+        marketTokenIds = new Set(marketData.tokens.map(t => t.tokenId.toLowerCase()));
+        console.log(`Filtering to market: ${marketData.question || market}`);
+      } catch (error) {
+        console.log(`Warning: Could not fetch market ${market}: ${error}`);
+        // Continue without filter
+      }
+    }
 
     // Fetch account history
     const accountHistory = await this.accountFetcher.getAccountHistory(normalizedWallet);
@@ -79,14 +96,26 @@ export class InvestigateCommand {
 
     if (this.subgraphClient) {
       try {
+        // Pass market filter to subgraph query if specified (more efficient than post-fetch filtering)
+        const marketIdsArray = marketTokenIds ? [...marketTokenIds] : undefined;
+
         [positions, recentTrades, redemptions] = await Promise.all([
           this.subgraphClient.getPositions(normalizedWallet),
           this.subgraphClient.getTradesByWallet(normalizedWallet, {
             limit: tradeLimit,
             orderDirection: 'desc',
+            marketIds: marketIdsArray,
           }),
           this.subgraphClient.getRedemptions(normalizedWallet),
         ]);
+
+        // Filter positions by market (positions API doesn't support market filter yet)
+        if (marketTokenIds) {
+          const beforePositionCount = positions.length;
+          positions = positions.filter(p => marketTokenIds!.has(p.marketId.toLowerCase()));
+          console.log(`  Trades fetched: ${recentTrades.length} (filtered at query level)`);
+          console.log(`  Filtered positions: ${positions.length}/${beforePositionCount}`);
+        }
       } catch (error) {
         console.log(`Subgraph query failed: ${error}`);
       }

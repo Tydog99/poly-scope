@@ -7,7 +7,7 @@ Last updated: 2026-01-06
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 77 tests passing across 14 test files
+- **Test Status**: All 143 tests passing across 14 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (2)
@@ -23,8 +23,9 @@ Last updated: 2026-01-06
    - Profiles a specific wallet address
    - Shows recent trades and market positions
    - Analyzes suspicion factors (account age, trade count, concentration, profit rate)
-   - **NEW**: Runs wallet's trades through the suspicious trade analyzer (same 3-signal system as `analyze`)
+   - Runs wallet's trades through the suspicious trade analyzer (same 3-signal system as `analyze`)
    - `--analyze-limit <n>` flag controls how many trades to analyze (default: 100, 0 to disable)
+   - `-m/--market` flag filters to a specific market at the GraphQL query level (not post-fetch)
 
 ### Three Weighted Detection Signals
 
@@ -66,7 +67,7 @@ Last updated: 2026-01-06
 - **Implemented Methods**:
   - `getAccount()` - Single wallet stats
   - `getAccountBatch()` - Multiple wallets in one query
-  - `getTradesByWallet()` - Maker + taker trades
+  - `getTradesByWallet()` - Maker + taker trades, supports `marketIds` filter
   - `getTradesByMarket()` - Paginated market trades (1000 per request)
   - `getTradesByCondition()` - Both YES/NO tokens
   - `getTradesByTimeRange()` - Time-filtered trades
@@ -344,3 +345,4 @@ docs/ (Planning documents)
 | 2026-01-06 | Fixed trade side interpretation bug: now properly inverts `side` field for takers (was using maker's side directly) |
 | 2026-01-06 | Added `--role` flag for analyze command: taker (default), maker, or both - avoids double-counting per Paradigm research |
 | 2026-01-06 | Added Trade Data Interpretation documentation to README.md with research links |
+| 2026-01-06 | Fixed investigate `-m` market filter: now filters at GraphQL query level instead of post-fetch (was missing trades when wallet had many trades in other markets) |

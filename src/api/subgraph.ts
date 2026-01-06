@@ -20,6 +20,7 @@ export interface TradeQueryOptions {
   before?: Date;
   after?: Date;
   orderDirection?: 'asc' | 'desc';
+  marketIds?: string[]; // Filter to specific token IDs (e.g., YES and NO tokens for a condition)
 }
 
 interface GraphQLResponse<T> {
@@ -186,17 +187,33 @@ export class SubgraphClient {
       variables.before = Math.floor(options.before.getTime() / 1000).toString();
     }
 
+    // Normalize market IDs if provided
+    const marketIds = options.marketIds?.map((id) => id.toLowerCase());
+    if (marketIds && marketIds.length > 0) {
+      variables.marketIds = marketIds;
+    }
+
     // Helper to build where clause string with placeholders replaced by variables
     const buildWhere = (baseWhere: string) => {
       let clause = baseWhere;
       if (variables.after) clause += `, timestamp_gte: $after`;
       if (variables.before) clause += `, timestamp_lte: $before`;
+      if (variables.marketIds) clause += `, market_in: $marketIds`;
       return clause;
     };
 
+    // Build variable declarations for GraphQL query
+    const varDeclarations = [
+      '$wallet: String!',
+      '$limit: Int!',
+      ...(variables.after ? ['$after: BigInt!'] : []),
+      ...(variables.before ? ['$before: BigInt!'] : []),
+      ...(variables.marketIds ? ['$marketIds: [String!]!'] : []),
+    ].join(', ');
+
     // Query maker trades
     const makerResult = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-      query($wallet: String!, $limit: Int!${variables.after ? ', $after: BigInt!' : ''}${variables.before ? ', $before: BigInt!' : ''}) {
+      query(${varDeclarations}) {
         enrichedOrderFilleds(
           first: $limit,
           where: { maker_: { id: $wallet }${buildWhere(' ')} }
@@ -218,7 +235,7 @@ export class SubgraphClient {
 
     // Query taker trades
     const takerResult = await this.query<{ enrichedOrderFilleds: RawTrade[] }>(`
-      query($wallet: String!, $limit: Int!${variables.after ? ', $after: BigInt!' : ''}${variables.before ? ', $before: BigInt!' : ''}) {
+      query(${varDeclarations}) {
         enrichedOrderFilleds(
           first: $limit,
           where: { taker_: { id: $wallet }${buildWhere(' ')} }

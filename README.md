@@ -22,7 +22,7 @@ npm run dev -- analyze -m 0x580adc1327de9bf7c179ef5aaffa3377bb5cb252b7d6390b0271
 npm run dev -- analyze -m <market> --max-trades 5000
 
 # Filter by date range
-npm run dev -- analyze -m <market> --after 2025-01-01 --before 2025-06-01
+npm run dev -- analyze -m <market> --after 2026-01-01 --before 2026-01-04
 
 # Filter by outcome
 npm run dev -- analyze -m <market> --outcome YES
