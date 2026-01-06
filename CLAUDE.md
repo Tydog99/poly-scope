@@ -208,3 +208,112 @@ curl "https://gamma-api.polymarket.com/markets?clob_token_ids=<token_id>" | jq '
 To determine if a token is YES or NO:
 1. Query Gamma API with the token ID
 2. Compare position in the `clobTokenIds` array (index 0 = YES, index 1 = NO)
+
+## Tool Use - API Query Reference
+
+Copy-paste ready queries for debugging and data exploration. Always `source .env` first to load `THE_GRAPH_API_KEY`.
+
+### Subgraph Queries
+
+**Base curl command** (reuse this pattern):
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "YOUR_QUERY_HERE"}'
+```
+
+#### Get wallet's recent trades (as taker)
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ enrichedOrderFilleds(where: { taker: \"WALLET_ADDRESS\" }, orderBy: timestamp, orderDirection: desc, first: 20) { transactionHash timestamp side size price market { id } } }"}' | jq '.data.enrichedOrderFilleds'
+```
+
+#### Get wallet's trades (both maker AND taker) - use `or` filter
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ enrichedOrderFilleds(where: { or: [{taker: \"WALLET_ADDRESS\"}, {maker: \"WALLET_ADDRESS\"}] }, orderBy: timestamp, orderDirection: desc, first: 30) { transactionHash timestamp maker { id } taker { id } market { id } side size price } }"}' | jq '.data.enrichedOrderFilleds'
+```
+
+**⚠️ IMPORTANT**: Cannot mix column filters with `or` at same level. This FAILS:
+```graphql
+# WRONG - will error
+where: { timestamp_gte: 123, or: [{taker: "..."}, {maker: "..."}] }
+
+# CORRECT - put timestamp inside each or branch
+where: { or: [{taker: "...", timestamp_gte: 123}, {maker: "...", timestamp_gte: 123}] }
+```
+
+#### Get wallet's positions (which tokens they hold/traded)
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ marketPositions(where: { user_: { id: \"WALLET_ADDRESS\" } }, first: 20, orderBy: valueBought, orderDirection: desc) { market { id } valueBought valueSold netValue netQuantity } }"}' | jq '.data.marketPositions'
+```
+
+#### Get account stats
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ account(id: \"WALLET_ADDRESS\") { id creationTimestamp numTrades collateralVolume profit } }"}' | jq '.data.account'
+```
+
+#### Get trades on a specific token/market
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ enrichedOrderFilleds(where: { market: \"TOKEN_ID\" }, orderBy: timestamp, orderDirection: desc, first: 20) { transactionHash timestamp maker { id } taker { id } side size price } }"}' | jq '.data.enrichedOrderFilleds'
+```
+
+#### Get redemptions for a wallet
+```bash
+source .env
+curl -s "https://gateway.thegraph.com/api/subgraphs/id/81Dm16JjuFSrqz813HysXoUPvzTwE7fsfPk2RTf66nyC" \
+  -H "Authorization: Bearer $THE_GRAPH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ redemptions(where: { redeemer_: { id: \"WALLET_ADDRESS\" } }, first: 20, orderBy: timestamp, orderDirection: desc) { id timestamp payout condition { id } } }"}' | jq '.data.redemptions'
+```
+
+### Gamma API Queries (Market Metadata)
+
+#### Resolve token ID to market question (YES/NO determination)
+```bash
+curl -s "https://gamma-api.polymarket.com/markets?clob_token_ids=TOKEN_ID" | jq '.[] | {question, outcome: (if .clobTokenIds | fromjson | .[0] == "TOKEN_ID" then "Yes" else "No" end), clobTokenIds}'
+```
+
+#### Resolve multiple token IDs at once (use repeated params)
+```bash
+curl -s "https://gamma-api.polymarket.com/markets?clob_token_ids=TOKEN_ID_1&clob_token_ids=TOKEN_ID_2" | jq '.[] | {question, clobTokenIds}'
+```
+
+#### Search markets by question text
+```bash
+curl -s "https://gamma-api.polymarket.com/markets?closed=false&_limit=100" | jq '.[] | select(.question | test("SEARCH_TERM"; "i")) | {question, conditionId, clobTokenIds}'
+```
+
+#### Get event with all markets (by slug)
+```bash
+curl -s "https://gamma-api.polymarket.com/events?slug=EVENT_SLUG" | jq '.[].markets[] | {question, conditionId, clobTokenIds}'
+```
+
+### Common Pitfalls
+
+1. **Wallet addresses must be lowercase** in subgraph queries
+2. **Token IDs are large decimal numbers**, not hex condition IDs
+3. **`size` and `price` fields have 6 decimal places** - divide by 1e6
+4. **`side` field is MAKER's side**, not the taker's action (see CLOB section above)
+5. **Positions persist after selling/redeeming** - `netQuantity=0` but record exists
+6. **Each transaction can have fills on BOTH YES and NO tokens** - need to filter complementary trades
