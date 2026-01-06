@@ -640,8 +640,8 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           positions: [
             createMockSubgraphPosition({
-              valueBought: '25000000000', // $25,000
-              netValue: '8000000000', // +$8,000 trading P&L
+              valueBought: '25000000000', // $25,000 cost basis
+              valueSold: '33000000000', // $33,000 sold -> P&L = $33k - $25k = +$8k
               netQuantity: '15000000000', // 15,000 shares
             }),
           ],
@@ -650,7 +650,7 @@ describe('CLIReporter', () => {
         const output = reporter.formatWalletReport(report);
 
         expect(output).toContain('$25,000'); // Cost basis
-        expect(output).toContain('+$8,000'); // Trading P&L
+        expect(output).toContain('+$8,000'); // Trading P&L = valueSold - valueBought
       });
 
       it('shows closed position with zero shares', () => {
@@ -717,7 +717,7 @@ describe('CLIReporter', () => {
           positions: [
             createMockSubgraphPosition({
               valueBought: '10000000000', // $10,000 cost basis
-              netValue: '2000000000', // +$2,000 trading P&L
+              valueSold: '12000000000', // $12,000 sales → +$2,000 trading P&L
             }),
           ],
           redemptions: [
@@ -1115,8 +1115,8 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           positions: [
             createMockSubgraphPosition({
-              valueBought: '10000000000', // $10,000
-              netValue: '-3000000000', // -$3,000 loss
+              valueBought: '10000000000', // $10,000 cost basis
+              valueSold: '7000000000', // $7,000 sales → -$3,000 loss
             }),
           ],
           resolvedMarkets: new Map(),

@@ -377,8 +377,12 @@ export class CLIReporter {
       // Show positions
       for (const pos of report.positions.slice(0, MAX_POSITIONS_DISPLAY)) {
         const costBasis = parseFloat(pos.valueBought) / 1e6;
-        const tradingPnL = parseFloat(pos.netValue) / 1e6;
+        const valueSold = parseFloat(pos.valueSold) / 1e6;
         const netQty = parseFloat(pos.netQuantity) / 1e6;
+
+        // Trading P&L = what you received - what you spent
+        // For open positions (valueSold = 0), P&L is 0 (unrealized)
+        const tradingPnL = valueSold - costBasis;
 
         totalCostBasis += costBasis;
         totalTradingPnL += tradingPnL;
@@ -387,7 +391,10 @@ export class CLIReporter {
         const costStr = this.formatUsd(costBasis).padStart(12);
         const pnlColor = tradingPnL >= 0 ? chalk.green : chalk.red;
         const pnlSign = tradingPnL >= 0 ? '+' : '';
-        const pnlStr = pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12));
+        // Show "unrealized" for open positions with no sales yet
+        const pnlStr = valueSold > 0
+          ? pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12))
+          : chalk.gray('unrealized'.padStart(12));
         const sharesStr = netQty > 0 ? `${Math.round(netQty).toLocaleString()}` : chalk.gray('closed');
 
         // Use resolved market name if available

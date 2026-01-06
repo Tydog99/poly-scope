@@ -349,3 +349,4 @@ docs/ (Planning documents)
 | 2026-01-06 | Enhanced investigate Recent Trades: shows both maker [M] and taker [T] fills with role indicators, marks complementary trades [C], includes breakdown in totals |
 | 2026-01-06 | Fixed complementary trade detection: now works at transaction level - when a tx has both YES/NO trades, the smaller value side is marked [C] (order routing artifact) |
 | 2026-01-06 | Exclude complementary trades from market subtotals - they're order routing artifacts, not primary intent |
+| 2026-01-06 | Fixed P&L calculation: now uses `valueSold - valueBought` instead of `netValue` directly (negative netValue = profit, was confusing) |
