@@ -73,16 +73,19 @@ export class InvestigateCommand {
     const { wallet, tradeLimit = 500, resolveMarkets = true, analyzeLimit = 100, market } = options;
     const normalizedWallet = wallet.toLowerCase();
 
-    // If market filter specified, get its token IDs
+    // If market filter specified, get its token IDs and condition ID
     let marketTokenIds: Set<string> | null = null;
+    let marketConditionId: string | null = null;
     if (market) {
       try {
         const marketData = await this.polymarketClient.getMarket(market);
         marketTokenIds = new Set(marketData.tokens.map(t => t.tokenId.toLowerCase()));
+        marketConditionId = marketData.conditionId?.toLowerCase() || market.toLowerCase();
         console.log(`Filtering to market: ${marketData.question || market}`);
       } catch (error) {
         console.log(`Warning: Could not fetch market ${market}: ${error}`);
-        // Continue without filter
+        // Use the provided market ID as condition ID fallback
+        marketConditionId = market.toLowerCase();
       }
     }
 
@@ -109,12 +112,21 @@ export class InvestigateCommand {
           this.subgraphClient.getRedemptions(normalizedWallet),
         ]);
 
-        // Filter positions by market (positions API doesn't support market filter yet)
-        if (marketTokenIds) {
+        // Filter positions and redemptions by market (APIs don't support market filter yet)
+        if (marketTokenIds || marketConditionId) {
           const beforePositionCount = positions.length;
-          positions = positions.filter(p => marketTokenIds!.has(p.marketId.toLowerCase()));
+          const beforeRedemptionCount = redemptions.length;
+
+          if (marketTokenIds) {
+            positions = positions.filter(p => marketTokenIds!.has(p.marketId.toLowerCase()));
+          }
+          if (marketConditionId) {
+            redemptions = redemptions.filter(r => r.conditionId.toLowerCase() === marketConditionId);
+          }
+
           console.log(`  Trades fetched: ${recentTrades.length} (filtered at query level)`);
           console.log(`  Filtered positions: ${positions.length}/${beforePositionCount}`);
+          console.log(`  Filtered redemptions: ${redemptions.length}/${beforeRedemptionCount}`);
         }
       } catch (error) {
         console.log(`Subgraph query failed: ${error}`);
