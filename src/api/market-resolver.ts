@@ -90,10 +90,10 @@ export class MarketResolver {
     if (tokenIds.length === 0) return results;
 
     try {
-      // Try batch lookup with clob_token_ids parameter
-      // Gamma API accepts comma-separated token IDs
-      const tokenIdsParam = tokenIds.join(',');
-      const url = `${GAMMA_API}/markets?clob_token_ids=${encodeURIComponent(tokenIdsParam)}`;
+      // Batch lookup with repeated clob_token_ids params
+      // Format: ?clob_token_ids=X&clob_token_ids=Y (comma-separated doesn't work)
+      const params = tokenIds.map(id => `clob_token_ids=${id}`).join('&');
+      const url = `${GAMMA_API}/markets?${params}`;
 
       const response = await fetch(url);
       if (response.ok) {
@@ -122,8 +122,6 @@ export class MarketResolver {
         }
       }
 
-      // Note: The clob_token_ids filter doesn't work on Gamma API
-      // and full market scan is too slow (20k+ markets).
       // Markets that can't be found will show as truncated token IDs.
     } catch (error) {
       console.warn(`Error fetching token IDs: ${error}`);
