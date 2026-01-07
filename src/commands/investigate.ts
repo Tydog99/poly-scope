@@ -4,9 +4,10 @@ import { PolymarketClient } from '../api/client.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
-import type { AccountHistory, Trade, SignalContext } from '../signals/types.js';
+import type { AccountHistory, SignalContext } from '../signals/types.js';
 import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption } from '../api/types.js';
 import type { SuspiciousTrade } from '../output/types.js';
+import { aggregateFills } from '../api/aggregator.js';
 
 export interface InvestigateOptions {
   wallet: string;
@@ -180,9 +181,23 @@ export class InvestigateCommand {
 
     if (analyzeLimit > 0 && recentTrades.length > 0 && resolvedMarketsMap) {
       const tradesToAnalyze = recentTrades.slice(0, analyzeLimit);
-      analyzedTradeCount = tradesToAnalyze.length;
 
-      console.log(`Analyzing ${analyzedTradeCount} trades for suspicious patterns...`);
+      // Build tokenToOutcome map from resolved markets
+      const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
+      for (const [tokenId, resolved] of resolvedMarketsMap) {
+        const outcome = resolved.outcome === 'Yes' ? 'YES' : resolved.outcome === 'No' ? 'NO' : 'YES';
+        tokenToOutcome.set(tokenId.toLowerCase(), outcome);
+      }
+
+      // Aggregate fills by transaction, filtering complementary trades
+      const aggregatedTrades = aggregateFills(tradesToAnalyze, {
+        wallet: normalizedWallet,
+        tokenToOutcome,
+        walletPositions: positions,
+      });
+
+      analyzedTradeCount = aggregatedTrades.length;
+      console.log(`Analyzing ${analyzedTradeCount} aggregated trades for suspicious patterns...`);
 
       const context: SignalContext = {
         config: this.config,
@@ -191,11 +206,7 @@ export class InvestigateCommand {
 
       const scoredTrades: SuspiciousTrade[] = [];
 
-      for (const subgraphTrade of tradesToAnalyze) {
-        // Convert SubgraphTrade to Trade
-        const trade = this.convertToTrade(subgraphTrade, normalizedWallet, resolvedMarketsMap);
-        if (!trade) continue; // Skip if can't resolve market
-
+      for (const trade of aggregatedTrades) {
         // Run through all signals
         const results = await Promise.all(
           this.signals.map(s => s.calculate(trade, context))
@@ -255,40 +266,6 @@ export class InvestigateCommand {
       suspiciousTrades,
       analyzedTradeCount,
       marketSummary,
-    };
-  }
-
-  /**
-   * Convert a SubgraphTrade to the normalized Trade type for signal analysis
-   */
-  private convertToTrade(
-    subgraphTrade: SubgraphTrade,
-    walletAddress: string,
-    resolvedMarkets: Map<string, ResolvedToken>
-  ): Trade | null {
-    const resolved = resolvedMarkets.get(subgraphTrade.marketId);
-    if (!resolved) return null; // Can't determine outcome without market resolution
-
-    // Determine wallet's actual action (maker's side matches side field, taker is opposite)
-    const isMaker = subgraphTrade.maker.toLowerCase() === walletAddress.toLowerCase();
-    const walletSide: 'BUY' | 'SELL' = isMaker
-      ? (subgraphTrade.side === 'Buy' ? 'BUY' : 'SELL')
-      : (subgraphTrade.side === 'Buy' ? 'SELL' : 'BUY');
-
-    // Parse numeric fields (6 decimals)
-    const size = parseFloat(subgraphTrade.size) / 1e6;
-    const price = parseFloat(subgraphTrade.price);
-
-    return {
-      id: subgraphTrade.id,
-      marketId: subgraphTrade.marketId,
-      wallet: walletAddress,
-      side: walletSide,
-      outcome: resolved.outcome.toUpperCase() as 'YES' | 'NO',
-      size: size / price, // Convert USD value back to shares
-      price,
-      timestamp: new Date(subgraphTrade.timestamp * 1000),
-      valueUsd: size,
     };
   }
 

@@ -378,3 +378,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Refactored analyze command to use `aggregateFills()` in wallet mode: replaced ~80 lines of inline aggregation with centralized function call |
 | 2026-01-07 | Updated TradeClassifier to use AggregatedTrade fields: valueUsd -> totalValueUsd |
 | 2026-01-07 | Updated analyze tests to use new field names: id -> transactionHash, price -> avgPrice, valueUsd -> totalValueUsd, size -> totalSize |
+| 2026-01-07 | Refactored investigate command to use `aggregateFills()`: removed `convertToTrade` method, now aggregates wallet trades by transaction and filters complementary trades |
