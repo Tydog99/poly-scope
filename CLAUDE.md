@@ -39,6 +39,7 @@ The detection pipeline:
 1. **Data Layer** (`src/api/`) - Fetches market data and trades via Polymarket APIs
    - `client.ts` - Wraps `@polymarket/clob-client` SDK
    - `trades.ts` - Fetches trade history (subgraph primary, Data API fallback)
+   - `aggregator.ts` - Aggregates fills into transactions by txHash
    - `accounts.ts` - Fetches account trading history
    - `subgraph.ts` - The Graph client for on-chain data
    - `slug.ts` - Resolves market slugs to condition IDs via Gamma API
@@ -62,7 +63,14 @@ The detection pipeline:
 
 ## Key Types
 
-- `Trade` - Normalized trade with wallet, side, outcome, size, price, valueUsd
+- `TradeFill` - Individual fill event from subgraph with id, size, price, valueUsd, timestamp
+- `AggregatedTrade` - Transaction-level trade aggregating fills by txHash:
+  - `transactionHash` - Primary key (one transaction = one trading decision)
+  - `totalSize` - Sum of shares across fills
+  - `totalValueUsd` - Sum of USD value
+  - `avgPrice` - Weighted average price
+  - `fills[]` - Preserved fill details
+- `Trade` - Alias for `AggregatedTrade` (backward compatibility)
 - `SignalResult` - Individual signal output (name, score 0-100, weight, details)
 - `AggregatedScore` - Combined score with isAlert flag
 - `AnalysisReport` - Full analysis output with market info and suspicious trades
