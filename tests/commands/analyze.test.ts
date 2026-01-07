@@ -38,37 +38,43 @@ vi.mock('../../src/signals/index.js', () => ({
 
 const mockTrades = [
   {
-    id: 't1',
+    transactionHash: 't1',
     marketId: 'test-market',
     wallet: '0xsuspicious',
     side: 'BUY',
     outcome: 'YES',
-    size: 50000,
-    price: 0.2, // Low price, should KEPT
+    totalSize: 50000,
+    avgPrice: 0.2, // Low price, should KEPT
     timestamp: new Date('2024-01-15'),
-    valueUsd: 10000,
+    totalValueUsd: 10000,
+    fills: [],
+    fillCount: 1,
   },
   {
-    id: 't2',
+    transactionHash: 't2',
     marketId: 'test-market',
     wallet: '0xwhale',
     side: 'BUY',
     outcome: 'YES',
-    size: 100000,
-    price: 0.98, // High price BUY, should be FILTERED
+    totalSize: 100000,
+    avgPrice: 0.98, // High price BUY, should be FILTERED
     timestamp: new Date('2024-01-15'),
-    valueUsd: 98000,
+    totalValueUsd: 98000,
+    fills: [],
+    fillCount: 1,
   },
   {
-    id: 't3',
+    transactionHash: 't3',
     marketId: 'test-market',
     wallet: '0xseller',
     side: 'SELL',
     outcome: 'YES',
-    size: 100000,
-    price: 0.99, // High price SELL, should be FILTERED
+    totalSize: 100000,
+    avgPrice: 0.99, // High price SELL, should be FILTERED
     timestamp: new Date('2024-01-15'),
-    valueUsd: 99000,
+    totalValueUsd: 99000,
+    fills: [],
+    fillCount: 1,
   },
 ];
 
@@ -115,7 +121,7 @@ describe('AnalyzeCommand', () => {
 
     // Should filter out t2 (BUY 0.98) and t3 (SELL 0.99)
     // Should keep t1 (BUY 0.2)
-    const tradeIds = report.suspiciousTrades.map(st => st.trade.id);
+    const tradeIds = report.suspiciousTrades.map(st => st.trade.transactionHash);
     expect(tradeIds).toContain('t1');
     expect(tradeIds).not.toContain('t2');
     expect(tradeIds).not.toContain('t3');
@@ -138,7 +144,7 @@ describe('AnalyzeCommand', () => {
     const cmd = new AnalyzeCommand(customConfig);
     const report = await cmd.execute({ marketId: 'test-market' });
 
-    const tradeIds = report.suspiciousTrades.map(st => st.trade.id);
+    const tradeIds = report.suspiciousTrades.map(st => st.trade.transactionHash);
     expect(tradeIds).toContain('t1');      // Price 0.2 < 0.90 -> Keep
     expect(tradeIds).not.toContain('t2');  // Price 0.98 > 0.90 -> Filter
     expect(tradeIds).not.toContain('t3');  // Price 0.99 > 0.90 -> Filter
@@ -152,7 +158,7 @@ describe('AnalyzeCommand', () => {
     const cmd = new AnalyzeCommand(customConfig);
     const report = await cmd.execute({ marketId: 'test-market' });
 
-    const tradeIds = report.suspiciousTrades.map(st => st.trade.id);
+    const tradeIds = report.suspiciousTrades.map(st => st.trade.transactionHash);
     expect(tradeIds).toContain('t1');
     expect(tradeIds).toContain('t2'); // Should be kept now
     expect(tradeIds).toContain('t3'); // Should be kept now

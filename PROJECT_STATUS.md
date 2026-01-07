@@ -375,3 +375,6 @@ docs/ (Planning documents)
 | 2026-01-07 | Updated ConvictionSignal to use AggregatedTrade: valueUsd -> totalValueUsd, simplified scoring with concentration-based thresholds |
 | 2026-01-07 | Updated output types (SuspiciousTrade, AnalysisReport) to use AggregatedTrade instead of Trade type |
 | 2026-01-07 | Updated CLI output to use AggregatedTrade fields: valueUsd -> totalValueUsd, price -> avgPrice |
+| 2026-01-07 | Refactored analyze command to use `aggregateFills()` in wallet mode: replaced ~80 lines of inline aggregation with centralized function call |
+| 2026-01-07 | Updated TradeClassifier to use AggregatedTrade fields: valueUsd -> totalValueUsd |
+| 2026-01-07 | Updated analyze tests to use new field names: id -> transactionHash, price -> avgPrice, valueUsd -> totalValueUsd, size -> totalSize |
