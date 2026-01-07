@@ -81,7 +81,12 @@ program
           wallet: opts.wallet,
         });
 
-        console.log(reporter.formatAnalysisReport(report));
+        // Use wallet-specific output format when -w is provided
+        if (opts.wallet) {
+          console.log(reporter.formatWalletAnalysis(report));
+        } else {
+          console.log(reporter.formatAnalysisReport(report));
+        }
 
         if (markets.length > 1) {
           console.log('\n' + '═'.repeat(60) + '\n');
