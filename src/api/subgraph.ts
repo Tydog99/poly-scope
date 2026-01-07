@@ -69,27 +69,84 @@ export class SubgraphClient {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+          const errorText = await response.text();
+          const error = new Error(`HTTP ${response.status}: ${errorText}`);
+
+          // Check for rate limiting
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After');
+            console.log(`        [RATE LIMITED] HTTP 429 - Too Many Requests`);
+            if (retryAfter) {
+              console.log(`        Retry-After: ${retryAfter} seconds`);
+            }
+            console.log(`        Consider waiting or reducing request frequency`);
+          }
+
+          if (attempt < this.retries) {
+            const waitTime = response.status === 429 ? 5000 * (attempt + 1) : 1000 * (attempt + 1);
+            console.log(`        [Retry ${attempt + 1}/${this.retries}] HTTP error: ${response.status} (waiting ${waitTime}ms)`);
+            lastError = error;
+            await new Promise((r) => setTimeout(r, waitTime));
+            continue;
+          }
+          throw error;
         }
 
         const json = (await response.json()) as GraphQLResponse<T>;
 
         if (json.errors && json.errors.length > 0) {
+          const errorMsg = json.errors[0].message;
+
+          // Check for rate limiting in GraphQL errors
+          const isRateLimited = json.errors.some(
+            (e) =>
+              e.message.includes('rate limit') ||
+              e.message.includes('too many requests') ||
+              e.message.includes('quota exceeded') ||
+              e.message.includes('throttl')
+          );
+          if (isRateLimited) {
+            console.log(`        [RATE LIMITED] ${errorMsg.slice(0, 100)}`);
+          }
+
           // Check if it's an indexer availability error (retryable)
           const isIndexerError = json.errors.some(
-            (e) => e.message.includes('bad indexers') || e.message.includes('Timeout')
+            (e) =>
+              e.message.includes('bad indexers') ||
+              e.message.includes('Timeout') ||
+              e.message.includes('indexer') ||
+              e.message.includes('Service Unavailable')
           );
-          if (isIndexerError && attempt < this.retries) {
-            lastError = new Error(json.errors[0].message);
+
+          const isRetryable = isIndexerError || isRateLimited;
+          if (isRetryable && attempt < this.retries) {
+            // Extract useful info from error message
+            const shortError = errorMsg.length > 100 ? errorMsg.slice(0, 100) + '...' : errorMsg;
+            const waitTime = isRateLimited ? 5000 * (attempt + 1) : 2000 * (attempt + 1);
+            console.log(`        [Retry ${attempt + 1}/${this.retries}] ${isRateLimited ? 'Rate limited' : 'Indexer error'}: ${shortError}`);
+            lastError = new Error(errorMsg);
+            await new Promise((r) => setTimeout(r, waitTime));
             continue;
           }
-          throw new Error(json.errors[0].message);
+          throw new Error(errorMsg);
         }
 
         return json.data || null;
       } catch (error) {
         lastError = error as Error;
+        const isAbort = (error as Error).name === 'AbortError';
         if (attempt < this.retries) {
+          if (isAbort) {
+            console.log(`        [Retry ${attempt + 1}/${this.retries}] Request timeout (${this.timeout}ms)`);
+          } else {
+            const shortError = lastError.message.length > 80 ? lastError.message.slice(0, 80) + '...' : lastError.message;
+            console.log(`        [Retry ${attempt + 1}/${this.retries}] Error: ${shortError}`);
+          }
+          // On final retry attempt, log the query for debugging
+          if (attempt === this.retries - 1) {
+            console.log(`        Query that failed (first 500 chars):`);
+            console.log(`        ${graphql.slice(0, 500).replace(/\n/g, ' ')}...`);
+          }
           // Wait before retry with exponential backoff
           await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         }
@@ -530,7 +587,25 @@ export class SubgraphClient {
       chunks.push(normalizedWallets.slice(i, i + CHUNK_SIZE));
     }
 
-    for (const chunk of chunks) {
+    const batchTimes: number[] = [];
+    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+      const chunk = chunks[chunkIdx];
+      const batchStart = Date.now();
+
+      if (chunks.length > 1) {
+        const avgTime = batchTimes.length > 0
+          ? batchTimes.reduce((a, b) => a + b, 0) / batchTimes.length
+          : 0;
+        const remaining = chunks.length - chunkIdx;
+        const etaStr = avgTime > 0
+          ? `, ~${Math.ceil((avgTime * remaining) / 1000)}s remaining`
+          : '';
+        const lastTimeStr = batchTimes.length > 0
+          ? ` (last: ${(batchTimes[batchTimes.length - 1] / 1000).toFixed(1)}s${etaStr})`
+          : '';
+        console.log(`      Redemptions batch ${chunkIdx + 1}/${chunks.length} (${chunk.length} wallets)${lastTimeStr}`);
+      }
+
       // Build aliased query fragments
       const fragments = chunk.map((w, i) => `
         r${i}: redemptions(first: 100, where: { redeemer_: { id: "${w}" } }) {
@@ -546,6 +621,7 @@ export class SubgraphClient {
           ${fragments.join('\n')}
         }
       `);
+      batchTimes.push(Date.now() - batchStart);
 
       if (!result) continue;
 
@@ -565,10 +641,20 @@ export class SubgraphClient {
    * Used when Account entity has invalid numTrades (e.g., 0 trades but high volume).
    * Queries actual enrichedOrderFilleds to count maker + taker trades.
    *
+   * Note: Only fetches up to 50 trades per wallet since we only need to distinguish:
+   * - 1 trade (very suspicious - first trade)
+   * - 2-5 trades (still suspicious)
+   * - 6-50 trades (decay)
+   * - ≥50 trades (established, score = 0)
+   *
    * @param wallets - Array of wallet addresses to query
-   * @returns Map of wallet address to trade count (capped at 500 per wallet)
+   * @param onBatchComplete - Optional callback called after each batch with results so far (for incremental caching)
+   * @returns Map of wallet address to trade count (capped at 50 per wallet)
    */
-  async getTradeCountBatch(wallets: string[]): Promise<Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>> {
+  async getTradeCountBatch(
+    wallets: string[],
+    onBatchComplete?: (batchResults: Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>) => void
+  ): Promise<Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>> {
     const results = new Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>();
 
     if (wallets.length === 0) {
@@ -578,28 +664,59 @@ export class SubgraphClient {
     const normalizedWallets = wallets.map((w) => w.toLowerCase());
 
     // Chunk wallets - each wallet needs 2 aliases (maker + taker), so 50 wallets = 100 aliases
+    // High-volume accounts (>$100k) are filtered out upstream, so remaining wallets are smaller
     const CHUNK_SIZE = 50;
+    const DELAY_BETWEEN_BATCHES_MS = 1000; // Prevent indexer overload
     const chunks: string[][] = [];
     for (let i = 0; i < normalizedWallets.length; i += CHUNK_SIZE) {
       chunks.push(normalizedWallets.slice(i, i + CHUNK_SIZE));
     }
 
-    for (const chunk of chunks) {
+    const batchTimes: number[] = [];
+    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+      const chunk = chunks[chunkIdx];
+      const batchStart = Date.now();
+
+      if (chunks.length > 1) {
+        const avgTime = batchTimes.length > 0
+          ? batchTimes.reduce((a, b) => a + b, 0) / batchTimes.length
+          : 0;
+        const remaining = chunks.length - chunkIdx;
+        const etaStr = avgTime > 0
+          ? `, ~${Math.ceil((avgTime * remaining) / 1000)}s remaining`
+          : '';
+        const lastTimeStr = batchTimes.length > 0
+          ? ` (last: ${(batchTimes[batchTimes.length - 1] / 1000).toFixed(1)}s${etaStr})`
+          : '';
+        console.log(`      Trade count batch ${chunkIdx + 1}/${chunks.length} (${chunk.length} wallets)${lastTimeStr}`);
+      }
+
       // Build aliased query fragments for maker and taker trades
+      // Only fetch 30 trades per role - we just need to detect if total >= 50 (established)
+      // 30 maker + 30 taker = 60 max, which is enough to detect 50+ threshold
       const fragments = chunk.flatMap((w, i) => [
-        `w${i}_maker: enrichedOrderFilleds(first: 500, where: {maker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
-        `w${i}_taker: enrichedOrderFilleds(first: 500, where: {taker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
+        `w${i}_maker: enrichedOrderFilleds(first: 30, where: {maker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
+        `w${i}_taker: enrichedOrderFilleds(first: 30, where: {taker: "${w}"}, orderBy: timestamp, orderDirection: asc) { id timestamp }`,
       ]);
 
-      const result = await this.query<Record<string, Array<{ id: string; timestamp: string }> | null>>(`
-        query {
-          ${fragments.join('\n')}
-        }
-      `);
+      // Build the query
+      const queryStr = `query { ${fragments.join('\n')} }`;
+
+      // Debug: log query details
+      if (process.env.DEBUG) {
+        console.log(`        Query size: ${queryStr.length} chars, ${fragments.length} fragments`);
+        console.log(`        Wallets in this batch:`);
+        chunk.forEach((w, i) => console.log(`          ${i}: ${w}`));
+        console.log(`        Full query:\n${queryStr}`);
+      }
+
+      const result = await this.query<Record<string, Array<{ id: string; timestamp: string }> | null>>(queryStr);
+      batchTimes.push(Date.now() - batchStart);
 
       if (!result) continue;
 
       // Aggregate trades per wallet
+      const batchResults = new Map<string, { count: number; firstTimestamp: number; lastTimestamp: number }>();
       for (let i = 0; i < chunk.length; i++) {
         const wallet = chunk[i];
         const makerTrades = result[`w${i}_maker`] || [];
@@ -617,11 +734,23 @@ export class SubgraphClient {
         const timestamps = [...tradeMap.values()];
         const count = tradeMap.size;
 
-        results.set(wallet, {
+        const data = {
           count,
           firstTimestamp: timestamps.length > 0 ? Math.min(...timestamps) : 0,
           lastTimestamp: timestamps.length > 0 ? Math.max(...timestamps) : 0,
-        });
+        };
+        results.set(wallet, data);
+        batchResults.set(wallet, data);
+      }
+
+      // Call callback to allow incremental caching
+      if (onBatchComplete) {
+        onBatchComplete(batchResults);
+      }
+
+      // Add delay between batches to prevent indexer overload
+      if (chunkIdx < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, DELAY_BETWEEN_BATCHES_MS));
       }
     }
 

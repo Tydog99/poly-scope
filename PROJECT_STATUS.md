@@ -1,6 +1,6 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-06
+Last updated: 2026-01-07
 
 ## 1. Current Implementation - Fully Functional
 
@@ -354,3 +354,10 @@ docs/ (Planning documents)
 | 2026-01-06 | Added ROI column to Positions table: shows per-market ROI calculated from (valueSold + redemption - cost) / cost |
 | 2026-01-06 | Merged Redemptions into Positions table: realized gains now shown inline, removed separate Redemptions section |
 | 2026-01-06 | Added sync-issue detection: shows "(sync-issue)" when position has redemption but still shows remaining shares |
+| 2026-01-06 | Fixed candidate threshold mismatch: now uses `alertThreshold - 10` instead of hardcoded 60, ensuring all potentially flagged trades get account data fetched |
+| 2026-01-06 | Added `--debug` flag to analyze command: shows detailed score breakdowns for each suspicious trade |
+| 2026-01-06 | Added graceful fallback for subgraph indexer failures: estimates trade counts from volume when indexers unavailable |
+| 2026-01-07 | Added redemption caching to `.cache/redemptions/` - survives failed runs |
+| 2026-01-07 | Enabled account/redemption caching by default (use `--no-cache` to disable) |
+| 2026-01-07 | Added progress timing to all batch operations (shows last query time + ETA) |
+| 2026-01-07 | Added trade count caching to `.cache/trade-counts/` with incremental saves after each batch |

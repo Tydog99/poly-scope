@@ -83,6 +83,7 @@ export const DEFAULT_CONFIG: Config = {
     enabled: true,
     timeout: 30000,
     retries: 2,
+    cacheAccountLookup: true, // Cache account data to resume on failure
   },
   tradeRole: 'taker', // Default to taker-only to avoid double-counting
   alertThreshold: 70,

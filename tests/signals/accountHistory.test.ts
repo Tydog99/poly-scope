@@ -61,7 +61,7 @@ describe('AccountHistorySignal', () => {
   it('returns high score for dormant accounts', async () => {
     const history: AccountHistory = {
       wallet: '0xabc',
-      totalTrades: 50,
+      totalTrades: 20, // Not established, but not brand new either
       firstTradeDate: new Date('2023-06-01'),
       lastTradeDate: new Date('2023-10-01'), // 106 days dormant
       totalVolumeUsd: 100000,
@@ -80,6 +80,94 @@ describe('AccountHistorySignal', () => {
   it('has correct name and weight', () => {
     expect(signal.name).toBe('accountHistory');
     expect(signal.weight).toBe(35);
+  });
+
+  describe('trade count scoring', () => {
+    // Helper to create history with specific trade count
+    const makeHistoryWithTrades = (totalTrades: number): AccountHistory => ({
+      wallet: '0xabc',
+      totalTrades,
+      firstTradeDate: new Date('2024-01-10'), // 5 days old (moderately new)
+      lastTradeDate: new Date('2024-01-15'),
+      totalVolumeUsd: 10000,
+    });
+
+    it('returns max score for first trade (1 trade)', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(1)));
+      // Trade count should contribute max score (~33 for 3-component)
+      expect(result.details.tradeCountScore).toBe(33);
+    });
+
+    it('returns max score for zero trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(0)));
+      expect(result.details.tradeCountScore).toBe(33);
+    });
+
+    it('returns 90% score for 2 trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(2)));
+      // 90% of 33 ≈ 30
+      expect(result.details.tradeCountScore).toBeCloseTo(30, 0);
+    });
+
+    it('returns 85% score for 3 trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(3)));
+      // 85% of 33 ≈ 28
+      expect(result.details.tradeCountScore).toBeCloseTo(28, 0);
+    });
+
+    it('returns 80% score for 4 trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(4)));
+      // 80% of 33 ≈ 26
+      expect(result.details.tradeCountScore).toBeCloseTo(26, 0);
+    });
+
+    it('returns 75% score for 5 trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(5)));
+      // 75% of 33 ≈ 25
+      expect(result.details.tradeCountScore).toBeCloseTo(25, 0);
+    });
+
+    it('returns ~70% score for 6 trades (start of decay)', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(6)));
+      // 70% of 33 ≈ 23
+      expect(result.details.tradeCountScore).toBeCloseTo(23, 0);
+    });
+
+    it('returns ~35% score for 28 trades (midpoint of decay)', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(28)));
+      // Halfway between 6 and 50 should be ~35% of 33 ≈ 12
+      expect(result.details.tradeCountScore).toBeCloseTo(12, 1);
+    });
+
+    it('returns near-zero score for 49 trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(49)));
+      // Almost at 50, should be very low
+      expect(result.details.tradeCountScore).toBeLessThan(3);
+    });
+
+    it('returns zero score for exactly 50 trades (established)', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(50)));
+      expect(result.details.tradeCountScore).toBe(0);
+    });
+
+    it('returns zero score for 100+ trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(100)));
+      expect(result.details.tradeCountScore).toBe(0);
+    });
+
+    it('returns zero score for 500+ trades', async () => {
+      const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(500)));
+      expect(result.details.tradeCountScore).toBe(0);
+    });
+
+    it('score decreases monotonically from 1 to 50 trades', async () => {
+      let previousScore = 100;
+      for (const trades of [1, 2, 3, 4, 5, 6, 10, 20, 30, 40, 49, 50]) {
+        const result = await signal.calculate(makeTrade(), makeContext(makeHistoryWithTrades(trades)));
+        expect(result.details.tradeCountScore).toBeLessThanOrEqual(previousScore);
+        previousScore = result.details.tradeCountScore as number;
+      }
+    });
   });
 
   describe('with subgraph data', () => {

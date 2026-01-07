@@ -108,11 +108,23 @@ export class AccountHistorySignal implements Signal {
     };
   }
 
-  private scoreTradeCount(count: number, threshold: number, maxScore: number): number {
-    if (count >= threshold * 10) return 0;
-    if (count <= threshold) return maxScore;
-    // Linear decay from threshold to threshold*10
-    return maxScore * (1 - (count - threshold) / (threshold * 9));
+  /**
+   * Score based on trade count:
+   * - 1 trade: 100% of maxScore (very suspicious - first trade)
+   * - 2-5 trades: 90-70% of maxScore (still suspicious)
+   * - 6-50 trades: linear decay from 70% to 0%
+   * - 50+ trades: 0 (established trader)
+   */
+  private scoreTradeCount(count: number, _threshold: number, maxScore: number): number {
+    if (count <= 0) return maxScore; // No trades = max suspicious
+    if (count === 1) return maxScore; // First trade = max suspicious
+    if (count <= 5) {
+      // 2-5 trades: 90% down to 70% of maxScore
+      return maxScore * (0.9 - (count - 2) * 0.05);
+    }
+    if (count >= 50) return 0; // Established trader
+    // 6-50 trades: linear decay from 70% to 0%
+    return maxScore * 0.7 * (1 - (count - 6) / 44);
   }
 
   private scoreAccountAge(days: number, threshold: number, maxScore: number): number {

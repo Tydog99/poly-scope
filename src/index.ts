@@ -28,8 +28,9 @@ program
   .option('--min-size <usd>', 'Override minimum trade size', parseFloat)
   .option('--threshold <score>', 'Override alert threshold', parseFloat)
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
-  .option('--cache-account-lookup', 'Cache account history lookups')
+  .option('--no-cache', 'Disable account/redemption caching (cache is ON by default)')
   .option('--role <taker|maker|both>', 'Filter trades by participant role (default: taker to avoid double-counting)')
+  .option('--debug', 'Show detailed score breakdowns for each trade')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
 
@@ -37,10 +38,10 @@ program
     if (opts.minSize) config.tradeSize.minAbsoluteUsd = opts.minSize;
     if (opts.threshold) config.alertThreshold = opts.threshold;
     if (opts.subgraph === false) config.subgraph.enabled = false;
-    if (opts.cacheAccountLookup) config.subgraph.cacheAccountLookup = true;
+    if (opts.cache === false) config.subgraph.cacheAccountLookup = false;
 
     const command = new AnalyzeCommand(config);
-    const reporter = new CLIReporter();
+    const reporter = new CLIReporter({ debug: opts.debug });
     const slugResolver = new SlugResolver();
 
     try {

@@ -50,7 +50,7 @@ export interface AccountHistory {
   profitUsd?: number; // Lifetime P&L (trading + redemptions)
   tradingProfitUsd?: number; // valueSold - valueBought (before redemptions)
   redemptionPayoutsUsd?: number; // Total payouts from resolved winning positions
-  dataSource?: 'data-api' | 'subgraph' | 'subgraph-trades' | 'cache';
+  dataSource?: 'data-api' | 'subgraph' | 'subgraph-trades' | 'subgraph-estimated' | 'cache';
 }
 
 export interface PricePoint {

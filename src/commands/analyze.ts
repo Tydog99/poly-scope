@@ -47,7 +47,10 @@ export class AnalyzeCommand {
       }
     }
 
-    this.tradeFetcher = new TradeFetcher({ subgraphClient });
+    this.tradeFetcher = new TradeFetcher({
+      subgraphClient,
+      disableCache: !config.subgraph.cacheAccountLookup
+    });
     this.accountFetcher = new AccountFetcher({
       subgraphClient,
       cacheAccountLookup: config.subgraph.cacheAccountLookup
@@ -131,7 +134,9 @@ export class AnalyzeCommand {
       quickScores.push({ trade, quickScore: quickScore.total, quickResults });
 
       // Collect wallets from trades that might be suspicious
-      if (quickScore.total > 60) {
+      // Use alertThreshold - 10 to ensure we fetch data for all potentially flagged trades
+      const candidateThreshold = Math.max(40, this.config.alertThreshold - 10);
+      if (quickScore.total >= candidateThreshold) {
         candidateWallets.add(trade.wallet.toLowerCase());
       }
     }

@@ -26,7 +26,13 @@ interface WalletStats {
   color: ChalkInstance;
 }
 
+export interface ReporterOptions {
+  debug?: boolean;
+}
+
 export class CLIReporter {
+  constructor(private options: ReporterOptions = {}) {}
+
   formatAnalysisReport(report: AnalysisReport): string {
     const lines: string[] = [];
 
@@ -71,6 +77,9 @@ export class CLIReporter {
 
     report.suspiciousTrades.forEach((st, idx) => {
       lines.push(this.formatSuspiciousTradeRow(st, idx + 1, walletStats));
+      if (this.options.debug) {
+        lines.push(this.formatDebugDetails(st));
+      }
     });
 
     // Add wallet summary footer with full addresses for easy copying
@@ -228,6 +237,71 @@ export class CLIReporter {
       conviction: 'Conv',
     };
     return abbrevs[name] || name;
+  }
+
+  /**
+   * Format detailed debug information for a suspicious trade
+   */
+  private formatDebugDetails(st: SuspiciousTrade): string {
+    const lines: string[] = [];
+
+    for (const signal of st.score.signals) {
+      const details = signal.details as Record<string, unknown>;
+      let detailStr = '';
+
+      if (signal.name === 'tradeSize') {
+        const valueUsd = details.valueUsd as number | undefined;
+        const impactPct = details.impactPercent as number | undefined;
+        const sizeScore = details.sizeScore as number | undefined;
+        const impactScore = details.impactScore as number | undefined;
+        detailStr = `value=$${Math.round(valueUsd || 0).toLocaleString()}, ` +
+          `impact=${impactPct?.toFixed(1) || '?'}%, ` +
+          `sizeScore=${sizeScore || '?'}, impactScore=${impactScore || '?'}`;
+      } else if (signal.name === 'accountHistory') {
+        const reason = details.reason as string | undefined;
+        if (reason === 'skipped_budget') {
+          detailStr = chalk.yellow('PLACEHOLDER - account data not fetched');
+        } else if (reason === 'no_history') {
+          detailStr = chalk.red('NEW ACCOUNT - no trading history found');
+        } else {
+          const totalTrades = details.totalTrades as number | undefined;
+          const ageDays = details.accountAgeDays as number | undefined;
+          const dormancy = details.dormancyDays as number | undefined;
+          const dataSource = details.dataSource as string | undefined;
+          const profitUsd = details.profitUsd as number | undefined;
+          detailStr = `trades=${totalTrades || '?'}, age=${ageDays || '?'}d, ` +
+            `dormancy=${dormancy || 0}d` +
+            (profitUsd !== undefined ? `, profit=$${Math.round(profitUsd).toLocaleString()}` : '') +
+            ` [${dataSource || '?'}]`;
+        }
+      } else if (signal.name === 'conviction') {
+        const reason = details.reason as string | undefined;
+        if (reason === 'no_history') {
+          detailStr = chalk.yellow('PLACEHOLDER - no volume history');
+        } else {
+          const tradeValue = details.tradeValueUsd as number | undefined;
+          const totalVolume = details.totalVolumeUsd as number | undefined;
+          const tradePct = details.tradePercent as number | undefined;
+          detailStr = `trade=$${Math.round(tradeValue || 0).toLocaleString()} / ` +
+            `total=$${Math.round(totalVolume || 0).toLocaleString()} = ${tradePct?.toFixed(1) || '?'}%`;
+        }
+      }
+
+      lines.push(chalk.gray(`        ${this.getSignalAbbrev(signal.name)}: ${detailStr}`));
+    }
+
+    // Account summary if available
+    if (st.accountHistory) {
+      const h = st.accountHistory;
+      const ageDays = h.creationDate
+        ? Math.floor((Date.now() - h.creationDate.getTime()) / (1000 * 60 * 60 * 24))
+        : h.firstTradeDate
+          ? Math.floor((Date.now() - h.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24))
+          : '?';
+      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(h.totalVolumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
+    }
+
+    return lines.join('\n');
   }
 
   truncateWallet(wallet: string, linkable = true): string {

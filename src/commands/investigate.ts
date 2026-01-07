@@ -33,7 +33,7 @@ export interface WalletReport {
   redemptions: SubgraphRedemption[];
   recentTrades: SubgraphTrade[];
   suspicionFactors: string[];
-  dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'cache';
+  dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'subgraph-estimated' | 'cache';
   resolvedMarkets?: Map<string, ResolvedToken>;
   suspiciousTrades?: SuspiciousTrade[]; // Trades that scored above alert threshold
   analyzedTradeCount?: number; // How many trades were analyzed

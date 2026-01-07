@@ -19,6 +19,7 @@ interface DataApiTrade {
 export interface TradeFetcherOptions {
   subgraphClient?: SubgraphClient | null;
   cache?: TradeCache;
+  disableCache?: boolean;
 }
 
 export interface GetTradesOptions {
@@ -41,10 +42,12 @@ export interface GetTradesOptions {
 export class TradeFetcher {
   private cache: TradeCache;
   private subgraphClient: SubgraphClient | null;
+  private disableCache: boolean;
 
   constructor(options: TradeFetcherOptions = {}) {
     this.cache = options.cache ?? new TradeCache();
     this.subgraphClient = options.subgraphClient ?? null;
+    this.disableCache = options.disableCache ?? false;
   }
 
   async getTradesForMarket(
@@ -53,8 +56,8 @@ export class TradeFetcher {
   ): Promise<Trade[]> {
     const maxTrades = options.maxTrades ?? 10000;
 
-    // Load cached data
-    const cached = this.cache.load(marketId);
+    // Load cached data (unless caching disabled)
+    const cached = this.disableCache ? null : this.cache.load(marketId);
 
     // Try subgraph first if available AND we have token IDs
     if (this.subgraphClient && options.market?.tokens?.length) {
@@ -75,7 +78,11 @@ export class TradeFetcher {
 
         if (trades.length > 0) {
           console.log(`Synced ${trades.length} new trades from subgraph`);
-          // Merge with cache
+          // Merge with cache (unless caching disabled)
+          if (this.disableCache) {
+            const allTrades = cached ? [...cached.trades, ...trades] : trades;
+            return this.applyFilters(allTrades, options);
+          }
           const merged = this.cache.merge(marketId, trades);
           return this.applyFilters(merged.trades, options);
         } else if (cached && cached.trades.length > 0) {
@@ -120,10 +127,16 @@ export class TradeFetcher {
     let currentCount: number;
 
     if (newTrades.length > 0) {
-      const merged = this.cache.merge(marketId, newTrades);
-      allTrades = merged.trades;
-      currentCount = allTrades.length;
-      console.log(`Fetched ${newTrades.length} new trades from Data API, total cached: ${currentCount}`);
+      if (this.disableCache) {
+        allTrades = cached ? [...cached.trades, ...newTrades] : newTrades;
+        currentCount = allTrades.length;
+        console.log(`Fetched ${newTrades.length} new trades from Data API (cache disabled)`);
+      } else {
+        const merged = this.cache.merge(marketId, newTrades);
+        allTrades = merged.trades;
+        currentCount = allTrades.length;
+        console.log(`Fetched ${newTrades.length} new trades from Data API, total cached: ${currentCount}`);
+      }
     } else if (cached) {
       allTrades = cached.trades;
       currentCount = allTrades.length;
@@ -140,9 +153,14 @@ export class TradeFetcher {
       console.log(`Backfilling ${needed} older trades...`);
       const olderTrades = await this.fetchOlderTradesFromDataApi(marketId, currentCount, needed);
       if (olderTrades.length > 0) {
-        const merged = this.cache.merge(marketId, olderTrades);
-        allTrades = merged.trades;
-        console.log(`Fetched ${olderTrades.length} older trades, total cached: ${allTrades.length}`);
+        if (this.disableCache) {
+          allTrades = [...allTrades, ...olderTrades];
+          console.log(`Fetched ${olderTrades.length} older trades (cache disabled)`);
+        } else {
+          const merged = this.cache.merge(marketId, olderTrades);
+          allTrades = merged.trades;
+          console.log(`Fetched ${olderTrades.length} older trades, total cached: ${allTrades.length}`);
+        }
       }
     }
 
