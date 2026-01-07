@@ -1091,6 +1091,9 @@ export class CLIReporter {
         for (let i = 0; i < Math.min(report.suspiciousTrades.length, MAX_SUSPICIOUS_TRADES_DISPLAY); i++) {
           const st = report.suspiciousTrades[i];
           lines.push(this.formatSuspiciousTradeForWallet(st, i + 1, report.resolvedMarkets));
+          if (this.options.debug) {
+            lines.push(this.formatDebugDetails(st));
+          }
         }
 
         if (report.suspiciousTrades.length > MAX_SUSPICIOUS_TRADES_DISPLAY) {
