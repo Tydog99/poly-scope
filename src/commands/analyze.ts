@@ -2,11 +2,12 @@ import type { Config } from '../config.js';
 import { PolymarketClient } from '../api/client.js';
 import { TradeFetcher } from '../api/trades.js';
 import { AccountFetcher } from '../api/accounts.js';
-import { createSubgraphClient } from '../api/subgraph.js';
+import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
 import { TradeClassifier } from '../signals/classifier.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
+import { getMarketResolver } from '../api/market-resolver.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -33,6 +34,7 @@ export class AnalyzeCommand {
   private client: PolymarketClient;
   private tradeFetcher: TradeFetcher;
   private accountFetcher: AccountFetcher;
+  private subgraphClient: SubgraphClient | null;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
   private classifier: TradeClassifier;
@@ -41,23 +43,23 @@ export class AnalyzeCommand {
     this.client = new PolymarketClient();
 
     // Create subgraph client if enabled and API key is available
-    let subgraphClient = null;
+    this.subgraphClient = null;
     if (config.subgraph.enabled) {
-      subgraphClient = createSubgraphClient({
+      this.subgraphClient = createSubgraphClient({
         timeout: config.subgraph.timeout,
         retries: config.subgraph.retries,
       });
-      if (subgraphClient) {
+      if (this.subgraphClient) {
         console.log('Using The Graph subgraph as primary data source');
       }
     }
 
     this.tradeFetcher = new TradeFetcher({
-      subgraphClient,
+      subgraphClient: this.subgraphClient,
       disableCache: !config.subgraph.cacheAccountLookup
     });
     this.accountFetcher = new AccountFetcher({
-      subgraphClient,
+      subgraphClient: this.subgraphClient,
       cacheAccountLookup: config.subgraph.cacheAccountLookup
     });
     this.signals = [
@@ -73,16 +75,74 @@ export class AnalyzeCommand {
     // 1. Fetch market metadata (includes token IDs for subgraph queries)
     const market = await this.client.getMarket(options.marketId);
 
-    // 2. Fetch all trades (uses subgraph as primary if available)
-    // Default to config tradeRole, allow override from options
+    // 2. Fetch trades
+    let allTrades: Trade[];
     const role = options.role ?? this.config.tradeRole;
-    const allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
-      market, // Pass market for subgraph token IDs
-      after: options.after,
-      before: options.before,
-      maxTrades: options.maxTrades,
-      role,
-    });
+
+    // WALLET MODE: Query wallet's trades directly from subgraph (bypasses cache/limit issues)
+    if (options.wallet && this.subgraphClient) {
+      console.log(`Fetching trades for wallet ${options.wallet.slice(0, 8)}... on this market...`);
+      const marketTokenIds = market.tokens.map(t => t.tokenId);
+      const subgraphTrades = await this.subgraphClient.getTradesByWallet(options.wallet, {
+        limit: 1000, // Get all wallet trades on this market
+        orderDirection: 'desc',
+        marketIds: marketTokenIds,
+        after: options.after,
+        before: options.before,
+      });
+
+      // Resolve token IDs to YES/NO outcomes
+      const resolver = getMarketResolver();
+      const resolvedTokens = await resolver.resolveBatch(marketTokenIds);
+
+      // Convert SubgraphTrade to Trade format
+      allTrades = subgraphTrades.map(st => {
+        const resolved = resolvedTokens.get(st.marketId.toLowerCase());
+        const outcome = resolved?.outcome === 'Yes' ? 'YES' : resolved?.outcome === 'No' ? 'NO' : 'YES';
+
+        // Determine wallet's action (maker vs taker)
+        const isMaker = st.maker.toLowerCase() === options.wallet!.toLowerCase();
+        const walletSide = isMaker
+          ? (st.side === 'Buy' ? 'BUY' : 'SELL')
+          : (st.side === 'Buy' ? 'SELL' : 'BUY');
+
+        const valueUsd = parseFloat(st.size) / 1e6;
+        const price = parseFloat(st.price);
+
+        return {
+          id: st.id,
+          marketId: st.marketId,
+          wallet: options.wallet!.toLowerCase(),
+          side: walletSide as 'BUY' | 'SELL',
+          outcome: outcome as 'YES' | 'NO',
+          size: valueUsd / price, // Approximate shares
+          price,
+          timestamp: new Date(st.timestamp * 1000),
+          valueUsd,
+          maker: st.maker,
+          taker: st.taker,
+          role: isMaker ? 'maker' : 'taker',
+        };
+      });
+
+      // Filter by role if specified (default: both for wallet mode)
+      if (role === 'taker') {
+        allTrades = allTrades.filter(t => t.role === 'taker');
+      } else if (role === 'maker') {
+        allTrades = allTrades.filter(t => t.role === 'maker');
+      }
+
+      console.log(`Found ${allTrades.length} trades for wallet on this market`);
+    } else {
+      // NORMAL MODE: Fetch all market trades (uses cache)
+      allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
+        market,
+        after: options.after,
+        before: options.before,
+        maxTrades: options.maxTrades,
+        role,
+      });
+    }
 
     // 3. Filter trades
     let tradesToAnalyze: Trade[];
@@ -99,8 +159,8 @@ export class AnalyzeCommand {
       tradesToAnalyze = allTrades;
     }
 
-    // Filter to specific wallet if requested
-    if (options.wallet) {
+    // Filter to specific wallet if requested (for non-subgraph fallback)
+    if (options.wallet && !this.subgraphClient) {
       const walletLower = options.wallet.toLowerCase();
       tradesToAnalyze = tradesToAnalyze.filter(t =>
         t.wallet.toLowerCase() === walletLower
