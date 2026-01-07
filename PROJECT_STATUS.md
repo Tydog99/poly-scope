@@ -369,3 +369,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added weighted average price test for aggregateFills in `tests/api/aggregator.test.ts` |
 | 2026-01-07 | Added complementary trade detection to aggregator: filters smaller USD value side when tx has both YES/NO, uses position data to override when wallet has directional position |
 | 2026-01-07 | Added edge case tests for aggregator: single-fill transactions, empty input, multiple separate transactions, maker vs taker role determination, side inversion for takers |
+| 2026-01-07 | Updated Signal interface to use AggregatedTrade type with new field names (totalValueUsd, totalSize, avgPrice); typecheck fails until signals are updated (Tasks 7-9) |

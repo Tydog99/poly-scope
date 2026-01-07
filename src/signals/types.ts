@@ -1,3 +1,5 @@
+import type { AggregatedTrade } from '../api/types.js';
+
 export interface SignalResult {
   name: string;
   score: number; // 0-100
@@ -14,7 +16,7 @@ export interface AggregatedScore {
 export interface Signal {
   name: string;
   weight: number;
-  calculate(trade: Trade, context: SignalContext): Promise<SignalResult>;
+  calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult>;
 }
 
 export interface SignalContext {
@@ -23,21 +25,9 @@ export interface SignalContext {
   marketPrices?: PricePoint[];
 }
 
-export interface Trade {
-  id: string;
-  marketId: string;
-  wallet: string;
-  side: 'BUY' | 'SELL';
-  outcome: 'YES' | 'NO';
-  size: number; // number of shares
-  price: number; // 0-1
-  timestamp: Date;
-  valueUsd: number; // size * price
-  // Role info for maker/taker filtering (from subgraph data)
-  maker?: string; // Maker wallet address
-  taker?: string; // Taker wallet address
-  role?: 'maker' | 'taker'; // Which role the wallet played in this trade
-}
+// Re-export AggregatedTrade as Trade for backward compatibility during migration
+// TODO: Remove this alias after all consumers are updated
+export type Trade = AggregatedTrade;
 
 export interface AccountHistory {
   wallet: string;
