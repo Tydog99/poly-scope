@@ -104,6 +104,189 @@ export class CLIReporter {
     return lines.join('\n');
   }
 
+  /**
+   * Format analysis report for wallet-targeted mode
+   * Shows: account header, trades table, detailed breakdowns
+   */
+  formatWalletAnalysis(report: AnalysisReport): string {
+    const lines: string[] = [];
+    const wallet = report.targetWallet!;
+    const account = report.targetAccountHistory;
+
+    // === PART A: Account Header ===
+    lines.push('');
+    lines.push(chalk.bold('═'.repeat(70)));
+    lines.push(chalk.bold(`Wallet Analysis: ${this.truncateWallet(wallet, false)} on "${this.truncateQuestion(report.market.question, 50)}"`));
+    lines.push(chalk.bold('═'.repeat(70)));
+    lines.push('');
+
+    lines.push(chalk.bold('Account Stats:'));
+    if (account) {
+      if (account.creationDate) {
+        const ageDays = Math.floor((Date.now() - account.creationDate.getTime()) / (1000 * 60 * 60 * 24));
+        lines.push(`  Created:      ${account.creationDate.toLocaleDateString()} (${ageDays} days ago)`);
+      } else if (account.firstTradeDate) {
+        const ageDays = Math.floor((Date.now() - account.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24));
+        lines.push(`  First Trade:  ${account.firstTradeDate.toLocaleDateString()} (${ageDays} days ago)`);
+      }
+      lines.push(`  Total Trades: ${account.totalTrades.toLocaleString()}`);
+      lines.push(`  Volume:       ${this.formatUsd(account.totalVolumeUsd)}`);
+      if (account.profitUsd !== undefined) {
+        const profitColor = account.profitUsd >= 0 ? chalk.green : chalk.red;
+        const sign = account.profitUsd >= 0 ? '+' : '';
+        const roi = account.totalVolumeUsd > 0
+          ? ((account.profitUsd / account.totalVolumeUsd) * 100).toFixed(1)
+          : '0.0';
+        lines.push(`  Profit:       ${profitColor(sign + this.formatUsd(account.profitUsd))} (${roi}% ROI)`);
+      }
+    } else {
+      lines.push(chalk.yellow('  No account history found'));
+    }
+    lines.push('');
+
+    // === PART B: Trades Summary Table ===
+    if (report.suspiciousTrades.length === 0) {
+      lines.push(chalk.yellow('No trades found for this wallet on this market.'));
+      return lines.join('\n');
+    }
+
+    lines.push(chalk.bold(`All Trades (${report.suspiciousTrades.length}):`));
+    lines.push(chalk.gray('Weights: Size 40% | Acct 35% | Conv 25%'));
+    lines.push('');
+
+    // Table header
+    lines.push(
+      chalk.bold('  #'.padEnd(5)) +
+      chalk.bold('Time'.padEnd(18)) +
+      chalk.bold('Side'.padEnd(10)) +
+      chalk.bold('Size'.padEnd(12)) +
+      chalk.bold('Price'.padEnd(8)) +
+      chalk.bold('Score'.padEnd(10)) +
+      chalk.bold('Breakdown')
+    );
+    lines.push(chalk.gray('  ' + '─'.repeat(90)));
+
+    // Table rows
+    report.suspiciousTrades.forEach((st, idx) => {
+      const getScore = (name: string) => st.score.signals.find(s => s.name === name)?.score ?? 0;
+      const sizeScore = getScore('tradeSize');
+      const acctScore = getScore('accountHistory');
+      const convScore = getScore('conviction');
+
+      const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
+      const sideStr = `${st.trade.side} ${st.trade.outcome}`;
+      const sideColor = st.trade.side === 'BUY' ? chalk.green : chalk.red;
+
+      lines.push(
+        `  ${String(idx + 1).padEnd(4)}` +
+        `${this.formatTime(st.trade.timestamp).padEnd(18)}` +
+        `${sideColor(sideStr.padEnd(10))}` +
+        `${this.formatUsd(st.trade.valueUsd).padStart(10)}  ` +
+        `${st.trade.price.toFixed(2).padStart(6)}  ` +
+        `${scoreColor(String(st.score.total).padStart(3))}  ` +
+        chalk.gray(`Sz:${String(sizeScore).padStart(2)} Ac:${String(acctScore).padStart(2)} Cv:${String(convScore).padStart(2)}`)
+      );
+    });
+
+    lines.push('');
+
+    // === PART C: Detailed Breakdowns ===
+    lines.push(chalk.bold('Detailed Signal Breakdowns:'));
+    lines.push('');
+
+    report.suspiciousTrades.forEach((st, idx) => {
+      lines.push(this.formatDetailedTradeBreakdown(st, idx + 1));
+      lines.push('');
+    });
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Format detailed breakdown for a single trade
+   */
+  private formatDetailedTradeBreakdown(st: SuspiciousTrade, rank: number): string {
+    const lines: string[] = [];
+    const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
+
+    // Trade header
+    lines.push(chalk.bold(`Trade #${rank}: ${st.trade.side} ${st.trade.outcome} ${this.formatUsd(st.trade.valueUsd)} @ ${st.trade.price.toFixed(2)} (${this.formatTime(st.trade.timestamp)})`));
+    lines.push(chalk.gray('─'.repeat(60)));
+
+    // Signal breakdowns
+    for (const signal of st.score.signals) {
+      const details = signal.details as Record<string, unknown>;
+      const weightPct = Math.round(signal.weight * 100);
+
+      lines.push(`  ${chalk.bold(this.getSignalFullName(signal.name))} (${weightPct}% weight)${' '.repeat(10)}Score: ${signal.score}`);
+
+      // Signal-specific details
+      if (signal.name === 'tradeSize') {
+        const valueUsd = details.valueUsd as number | undefined;
+        const impactPct = details.impactPercent as number | undefined;
+        const sizeScore = details.sizeScore as number | undefined;
+        const impactScore = details.impactScore as number | undefined;
+
+        lines.push(chalk.gray(`    - Absolute size: ${this.formatUsd(valueUsd || 0)} -> ${sizeScore || 0} pts`));
+        if (impactPct !== undefined) {
+          lines.push(chalk.gray(`    - Market impact: ${impactPct.toFixed(1)}% price move -> ${impactScore || 0} pts`));
+        }
+      } else if (signal.name === 'accountHistory') {
+        const reason = details.reason as string | undefined;
+        if (reason === 'no_history') {
+          lines.push(chalk.red(`    - NEW ACCOUNT - no trading history found`));
+        } else {
+          const totalTrades = details.totalTrades as number | undefined;
+          const ageDays = details.accountAgeDays as number | undefined;
+          const dormancy = details.dormancyDays as number | undefined;
+          const profitUsd = details.profitUsd as number | undefined;
+          const tradeCountScore = details.tradeCountScore as number | undefined;
+          const ageScore = details.ageScore as number | undefined;
+          const dormancyScore = details.dormancyScore as number | undefined;
+          const profitScore = details.profitScore as number | undefined;
+
+          lines.push(chalk.gray(`    - Trade count: ${totalTrades || '?'} -> ${tradeCountScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Account age: ${ageDays || '?'} days -> ${ageScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Dormancy: ${dormancy || 0} days idle -> ${dormancyScore ?? 0} pts`));
+          if (profitUsd !== undefined && profitScore !== undefined) {
+            lines.push(chalk.gray(`    - Profit on new account: ${this.formatUsd(profitUsd)} -> ${profitScore} pts`));
+          } else {
+            lines.push(chalk.gray(`    - Profit on new account: N/A (not new)`));
+          }
+        }
+      } else if (signal.name === 'conviction') {
+        const reason = details.reason as string | undefined;
+        if (reason === 'no_history') {
+          lines.push(chalk.yellow(`    - PLACEHOLDER - no volume history`));
+        } else {
+          const tradeValue = details.tradeValueUsd as number | undefined;
+          const totalVolume = details.totalVolumeUsd as number | undefined;
+          const tradePct = details.tradePercent as number | undefined;
+
+          lines.push(chalk.gray(`    - Trade concentration: ${tradePct?.toFixed(1) || '?'}% of volume -> ${signal.score} pts`));
+          lines.push(chalk.gray(`      (${this.formatUsd(tradeValue || 0)} trade / ${this.formatUsd(totalVolume || 0)} total)`));
+        }
+      }
+
+      lines.push('');
+    }
+
+    // Final score with alert indicator
+    const alertIndicator = st.score.isAlert ? chalk.red(' !! ALERT') : '';
+    lines.push(`  ${chalk.bold('FINAL SCORE:')} ${scoreColor.bold(String(st.score.total))}${alertIndicator}`);
+
+    return lines.join('\n');
+  }
+
+  private getSignalFullName(name: string): string {
+    const names: Record<string, string> = {
+      tradeSize: 'Trade Size Signal',
+      accountHistory: 'Account History Signal',
+      conviction: 'Conviction Signal',
+    };
+    return names[name] || name;
+  }
+
   private calculateWalletStats(trades: SuspiciousTrade[]): Map<string, WalletStats> {
     const stats = new Map<string, WalletStats>();
 

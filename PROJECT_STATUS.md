@@ -362,3 +362,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added progress timing to all batch operations (shows last query time + ETA) |
 | 2026-01-07 | Added trade count caching to `.cache/trade-counts/` with incremental saves after each batch |
 | 2026-01-07 | Added `-w/--wallet` filter to analyze command: filters trades to specific wallet, shows all trades (not just alerts), skips safe bet filter |
+| 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
