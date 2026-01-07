@@ -104,7 +104,6 @@ program
   .requiredOption('-w, --wallet <address>', 'Wallet address to investigate')
   .option('-m, --market <conditionId>', 'Filter to a specific market (condition ID)')
   .option('--trades <number>', 'Number of recent trades to fetch (default: 500)', parseInt)
-  .option('--analyze-limit <number>', 'Number of trades to analyze for suspicious patterns (default: 100, 0 to disable)', parseInt)
   .option('--config <path>', 'Path to config file', './config.json')
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
   .action(async (opts) => {
@@ -122,7 +121,6 @@ program
       const report = await command.execute({
         wallet: opts.wallet,
         tradeLimit: opts.trades,
-        analyzeLimit: opts.analyzeLimit,
         market: opts.market,
       });
 

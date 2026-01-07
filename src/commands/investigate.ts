@@ -13,7 +13,6 @@ export interface InvestigateOptions {
   wallet: string;
   tradeLimit?: number;
   resolveMarkets?: boolean;
-  analyzeLimit?: number; // Number of trades to run through suspicious trade analysis (default: 100)
   market?: string; // Filter to a specific market (condition ID)
 }
 
@@ -82,7 +81,7 @@ export class InvestigateCommand {
   }
 
   async execute(options: InvestigateOptions): Promise<WalletReport> {
-    const { wallet, tradeLimit = 500, resolveMarkets = true, analyzeLimit = 100, market } = options;
+    const { wallet, tradeLimit = 500, resolveMarkets = true, market } = options;
     const normalizedWallet = wallet.toLowerCase();
 
     // If market filter specified, get its token IDs and condition ID
@@ -179,8 +178,8 @@ export class InvestigateCommand {
     let suspiciousTrades: SuspiciousTrade[] | undefined;
     let analyzedTradeCount: number | undefined;
 
-    if (analyzeLimit > 0 && recentTrades.length > 0 && resolvedMarketsMap) {
-      const tradesToAnalyze = recentTrades.slice(0, analyzeLimit);
+    if (recentTrades.length > 0 && resolvedMarketsMap) {
+      const tradesToAnalyze = recentTrades;
 
       // Build tokenToOutcome map from resolved markets
       const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
