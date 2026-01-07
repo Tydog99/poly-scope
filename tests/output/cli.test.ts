@@ -738,7 +738,7 @@ describe('CLIReporter', () => {
         expect(output).toContain('Bitcoin');
       });
 
-      it('shows (sync-issue) when redemption exists but shares remain', () => {
+      it('shows shares with (sync) flag when redemption exists but shares remain', () => {
         const tokenId = '12345678901234567890';
         const conditionId = '0xcondition-sync-issue';
 
@@ -751,7 +751,7 @@ describe('CLIReporter', () => {
             createMockSubgraphPosition({
               marketId: tokenId,
               valueBought: '10000000000',
-              netQuantity: '5000000000', // Still has shares!
+              netQuantity: '5000000000', // Still has 5000 shares!
             }),
           ],
           redemptions: [
@@ -765,7 +765,9 @@ describe('CLIReporter', () => {
 
         const output = reporter.formatWalletReport(report);
 
-        expect(output).toContain('sync-issue');
+        // Should show both the share count and the sync flag
+        expect(output).toContain('5,000');
+        expect(output).toContain('sync');
       });
 
       it('shows "redeemed" in shares column when netQuantity is 0 and has redemption', () => {
