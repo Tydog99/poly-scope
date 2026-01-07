@@ -1,39 +1,45 @@
-import type { Signal, SignalResult, Trade, SignalContext } from './types.js';
+import type { Signal, SignalResult, SignalContext } from './types.js';
+import type { AggregatedTrade } from '../api/types.js';
 
 export class ConvictionSignal implements Signal {
   name = 'conviction';
   weight = 25;
 
-  async calculate(trade: Trade, context: SignalContext): Promise<SignalResult> {
-    const { config, accountHistory } = context;
-    const { minPositionPercent } = config.conviction;
+  async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
+    const { accountHistory } = context;
 
-    // No history = assume high conviction (risky bet on unknown account)
-    if (!accountHistory) {
+    // If no account history, can't calculate conviction
+    if (!accountHistory || accountHistory.totalVolumeUsd === 0) {
+      // New wallet with no history - high conviction by default
       return {
         name: this.name,
-        score: 100,
+        score: 80,
         weight: this.weight,
-        details: { reason: 'no_history' },
+        details: {
+          reason: 'no_history',
+          tradeValueUsd: trade.totalValueUsd,
+        },
       };
     }
 
-    // Calculate what percentage of their historical volume this trade represents
-    const totalVolume = accountHistory.totalVolumeUsd;
-    const tradePercent = totalVolume > 0
-      ? (trade.valueUsd / totalVolume) * 100
-      : 100; // If no prior volume, treat as 100% conviction
+    // Calculate what percentage of their total volume this trade represents
+    const concentration = (trade.totalValueUsd / accountHistory.totalVolumeUsd) * 100;
 
-    // Score based on how much of portfolio is concentrated in this bet
-    let score = 0;
-    if (tradePercent >= minPositionPercent) {
+    // Score based on concentration
+    // 50%+ of volume in one trade = max score
+    // 10% = medium score
+    // <5% = low score
+    let score: number;
+    if (concentration >= 50) {
       score = 100;
-    } else if (tradePercent >= minPositionPercent / 2) {
-      // Linear scale from 50% threshold to 80% threshold
-      score = ((tradePercent - minPositionPercent / 2) / (minPositionPercent / 2)) * 100;
+    } else if (concentration >= 25) {
+      score = 70 + (concentration - 25) * 1.2; // 70-100
+    } else if (concentration >= 10) {
+      score = 40 + (concentration - 10) * 2; // 40-70
+    } else if (concentration >= 5) {
+      score = 20 + (concentration - 5) * 4; // 20-40
     } else {
-      // Below 40%, low conviction
-      score = (tradePercent / (minPositionPercent / 2)) * 30;
+      score = concentration * 4; // 0-20
     }
 
     return {
@@ -41,9 +47,9 @@ export class ConvictionSignal implements Signal {
       score: Math.round(Math.min(100, score)),
       weight: this.weight,
       details: {
-        tradeValueUsd: trade.valueUsd,
-        totalVolumeUsd: totalVolume,
-        tradePercent: Math.round(tradePercent * 10) / 10,
+        tradeValueUsd: trade.totalValueUsd,
+        totalVolumeUsd: accountHistory.totalVolumeUsd,
+        concentrationPercent: Math.round(concentration * 10) / 10,
       },
     };
   }
