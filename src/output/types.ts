@@ -1,8 +1,9 @@
-import type { AggregatedScore, Trade, AccountHistory } from '../signals/types.js';
+import type { AggregatedTrade } from '../api/types.js';
+import type { AggregatedScore, AccountHistory } from '../signals/types.js';
 import type { Market } from '../api/types.js';
 
 export interface SuspiciousTrade {
-  trade: Trade;
+  trade: AggregatedTrade;
   score: AggregatedScore;
   accountHistory?: AccountHistory;
   priceImpact?: {
@@ -19,7 +20,6 @@ export interface AnalysisReport {
   analyzedTrades: number;
   suspiciousTrades: SuspiciousTrade[];
   analyzedAt: Date;
-  // Wallet mode fields
   targetWallet?: string;
-  targetAccountHistory?: import('../signals/types.js').AccountHistory;
+  targetAccountHistory?: AccountHistory;
 }
