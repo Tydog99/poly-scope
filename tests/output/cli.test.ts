@@ -11,16 +11,29 @@ import type { Trade, AccountHistory, SignalResult } from '../../src/signals/type
 // =============================================================================
 
 function createMockTrade(overrides: Partial<Trade> = {}): Trade {
+  const timestamp = overrides.timestamp ?? new Date('2024-01-15T10:30:00Z');
+  const totalSize = overrides.totalSize ?? 50000;
+  const avgPrice = overrides.avgPrice ?? 0.12;
+  const totalValueUsd = overrides.totalValueUsd ?? 6000;
+
   return {
-    id: 't-1',
+    transactionHash: 't-1',
     marketId: 'test-123',
     wallet: '0x1234567890abcdef1234567890abcdef12345678',
     side: 'BUY',
     outcome: 'YES',
-    size: 50000,
-    price: 0.12,
-    timestamp: new Date('2024-01-15T10:30:00Z'),
-    valueUsd: 6000,
+    totalSize,
+    avgPrice,
+    timestamp,
+    totalValueUsd,
+    fills: [{
+      id: 't-1',
+      size: totalSize,
+      price: avgPrice,
+      valueUsd: totalValueUsd,
+      timestamp: Math.floor(timestamp.getTime() / 1000),
+    }],
+    fillCount: 1,
     ...overrides,
   };
 }
@@ -282,7 +295,7 @@ describe('CLIReporter', () => {
       const report = createMockAnalysisReport({
         suspiciousTrades: [
           createMockSuspiciousTrade({
-            trade: createMockTrade({ valueUsd: 12500, outcome: 'YES', price: 0.25 }),
+            trade: createMockTrade({ totalValueUsd: 12500, outcome: 'YES', avgPrice: 0.25 }),
           }),
         ],
       });
@@ -300,9 +313,9 @@ describe('CLIReporter', () => {
 
         const report = createMockAnalysisReport({
           suspiciousTrades: [
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 5000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 3000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 5000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 3000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 1000 }) }),
           ],
         });
         const output = reporter.formatAnalysisReport(report);
@@ -332,10 +345,10 @@ describe('CLIReporter', () => {
         const report = createMockAnalysisReport({
           suspiciousTrades: [
             // wallet2 has higher total volume
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 10000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 10000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 1000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 10000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 10000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 1000 }) }),
           ],
         });
         const output = reporter.formatAnalysisReport(report);
