@@ -357,9 +357,9 @@ export class CLIReporter {
 
       // Table header
       lines.push(
-        chalk.gray('  Market                              Cost Basis    Trading P&L      Realized       Shares')
+        chalk.gray('  Market                              Cost Basis    Trading P&L      Realized       Shares       ROI')
       );
-      lines.push(chalk.gray('  ' + '─'.repeat(95)));
+      lines.push(chalk.gray('  ' + '─'.repeat(106)));
 
       // Track totals
       let totalCostBasis = 0;
@@ -388,6 +388,17 @@ export class CLIReporter {
         totalCostBasis += costBasis;
         totalTradingPnL += tradingPnL;
 
+        // Use resolved market name if available
+        const resolved = report.resolvedMarkets?.get(pos.marketId);
+
+        // Look up redemption for this position's market
+        const redemption = resolved ? (redemptionsByCondition.get(resolved.conditionId) || 0) : 0;
+
+        // Calculate ROI: (total returns - cost) / cost * 100
+        // Total returns = valueSold + redemption
+        const totalReturns = valueSold + redemption;
+        const roi = costBasis > 0 ? ((totalReturns - costBasis) / costBasis) * 100 : 0;
+
         // Format values
         const costStr = this.formatUsd(costBasis).padStart(12);
         const pnlColor = tradingPnL >= 0 ? chalk.green : chalk.red;
@@ -398,14 +409,22 @@ export class CLIReporter {
           : chalk.gray('held'.padStart(12));
         const sharesStr = netQty > 0 ? `${Math.round(netQty).toLocaleString()}` : chalk.gray('closed');
 
-        // Use resolved market name if available
-        const resolved = report.resolvedMarkets?.get(pos.marketId);
+        // Format ROI - show "-" if position is still open (no sales, no redemption)
+        let roiStr: string;
+        if (totalReturns === 0) {
+          roiStr = chalk.gray('-'.padStart(10));
+        } else {
+          const roiColor = roi >= 0 ? chalk.green : chalk.red;
+          const roiSign = roi >= 0 ? '+' : '';
+          roiStr = roiColor((roiSign + roi.toFixed(0) + '%').padStart(10));
+        }
+
         const marketDisplay = resolved
           ? this.truncateQuestion(resolved.question, 30) + chalk.gray(` (${resolved.outcome})`)
           : pos.marketId.slice(0, 16) + '...';
 
         lines.push(
-          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${chalk.gray('-'.padStart(12))}    ${sharesStr}`
+          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${chalk.gray('-'.padStart(12))}    ${sharesStr.padStart(10)}  ${roiStr}`
         );
       }
 
@@ -416,7 +435,7 @@ export class CLIReporter {
       // Show redemptions section if any
       if (report.redemptions.length > 0) {
         lines.push('');
-        lines.push(chalk.gray('  ' + '─'.repeat(95)));
+        lines.push(chalk.gray('  ' + '─'.repeat(106)));
         lines.push(chalk.bold.green('  Redemptions (resolved market payouts):'));
 
         for (const r of report.redemptions.slice(0, MAX_REDEMPTIONS_DISPLAY)) {
@@ -436,15 +455,21 @@ export class CLIReporter {
 
       // Summary totals
       lines.push('');
-      lines.push(chalk.gray('  ' + '─'.repeat(95)));
+      lines.push(chalk.gray('  ' + '─'.repeat(106)));
       const totalPnL = totalTradingPnL + totalRealized;
       const totalColor = totalPnL >= 0 ? chalk.green : chalk.red;
       const totalSign = totalPnL >= 0 ? '+' : '';
       const tradingSign = totalTradingPnL >= 0 ? '+' : '';
       const tradingColor = totalTradingPnL >= 0 ? chalk.green : chalk.red;
 
+      // Calculate total ROI
+      const totalRoi = totalCostBasis > 0 ? ((totalPnL) / totalCostBasis) * 100 : 0;
+      const totalRoiColor = totalRoi >= 0 ? chalk.green : chalk.red;
+      const totalRoiSign = totalRoi >= 0 ? '+' : '';
+      const totalRoiStr = totalRoiColor((totalRoiSign + totalRoi.toFixed(0) + '%').padStart(10));
+
       lines.push(
-        `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(12)))}`
+        `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
       );
 
       lines.push('');
