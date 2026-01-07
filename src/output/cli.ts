@@ -364,6 +364,7 @@ export class CLIReporter {
       let totalCostBasis = 0;
       let totalTradingPnL = 0;
       let totalRealized = 0;
+      let hasUnsyncedPositions = false;
 
       // Build a map of redemptions by conditionId for potential matching
       const redemptionsByCondition = new Map<string, number>();
@@ -411,7 +412,8 @@ export class CLIReporter {
         let sharesSuffix = '';
         if (redemption > 0 && netQty > 0) {
           sharesStr = Math.round(netQty).toLocaleString();
-          sharesSuffix = chalk.yellow(' (unsynced)');
+          sharesSuffix = chalk.yellow('**');
+          hasUnsyncedPositions = true;
         } else if (netQty > 0) {
           sharesStr = Math.round(netQty).toLocaleString();
         } else if (redemption > 0) {
@@ -468,6 +470,12 @@ export class CLIReporter {
       lines.push(
         `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
       );
+
+      // Footer explaining ** notation
+      if (hasUnsyncedPositions) {
+        lines.push('');
+        lines.push(chalk.gray('  ** Position redeemed but shares not yet updated by blockchain indexer'));
+      }
 
       lines.push('');
     }
