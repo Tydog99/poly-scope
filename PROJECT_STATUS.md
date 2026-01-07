@@ -383,3 +383,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Fixed type errors in trades.ts: updated `convertSubgraphTrade` and `convertDataApiTrade` to return full AggregatedTrade objects with fills array |
 | 2026-01-07 | Updated all test fixtures to use AggregatedTrade shape: trades.test.ts, cli.test.ts, integration/analyze.test.ts |
 | 2026-01-07 | Updated integration test to use lower alertThreshold (60) to match candidate threshold calculation |
+| 2026-01-07 | **Aggregate Trades Implementation Complete**: All 15 tasks done, 200 tests pass, signals now score transactions instead of individual fills |
