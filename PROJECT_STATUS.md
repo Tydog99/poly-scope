@@ -285,6 +285,7 @@ src/
 │   ├── analyze.ts    - Market analysis
 │   └── investigate.ts - Wallet investigation
 ├── monitor/          (Real-time monitoring)
+│   ├── stream.ts     - WebSocket wrapper with reconnection
 │   └── types.ts      - Monitor type definitions
 ├── output/           (Formatting)
 │   ├── cli.ts        - Terminal output
@@ -370,3 +371,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added `@polymarket/real-time-data-client` dependency (v1.4.0) for real-time monitoring feature |
 | 2026-01-07 | Added monitor type definitions (`src/monitor/types.ts`): RTDSTradeEvent, EvaluatedTrade, MonitorConfig, ConnectionState, MonitorOptions |
 | 2026-01-07 | Added monitor configuration to config system: maxReconnects, retryDelaySeconds, stabilityThresholdSeconds, backoff settings with defaults |
+| 2026-01-07 | Added WebSocket stream wrapper (`src/monitor/stream.ts`): MonitorStream class with exponential backoff reconnection, ConnectionStatus handling, stability timer for reset |
