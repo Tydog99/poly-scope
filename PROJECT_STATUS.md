@@ -28,14 +28,13 @@ Last updated: 2026-01-07
    - `--analyze-limit <n>` flag controls how many trades to analyze (default: 100, 0 to disable)
    - `-m/--market` flag filters to a specific market at the GraphQL query level (not post-fetch)
 
-3. **`monitor`** - Real-time monitoring (in progress)
-   - Connects to Polymarket WebSocket for live trade events
-   - Monitors one or more markets by slug
-   - Evaluates trades in real-time using the 3-signal system
-   - Session cache for account history (5-minute TTL)
-   - Exponential backoff reconnection with stability timer
-   - Supports `--min-size`, `--threshold`, `--verbose` flags
-   - Merges CLI markets with config watchlist
+3. **`monitor`** - Real-time market surveillance
+   - Watches markets via RTDS WebSocket for suspicious trades
+   - Alerts when trades score above threshold (default 70)
+   - Quick-filters by minimum trade size (default $5k)
+   - Auto-reconnects with exponential backoff
+   - Color-coded output: YES (blue), NO (yellow)
+   - Uses 5-minute in-memory cache for account lookups
 
 ### Three Weighted Detection Signals
 
@@ -157,10 +156,10 @@ The subgraph client has advanced methods that aren't integrated into the main co
 
 - [ ] Batch wallet investigation (analyze multiple wallets at once)
 - [ ] Cross-market analysis (investigate trading patterns across multiple markets)
-- [ ] Watchlist support (mentioned in config but not implemented)
+- [x] ~~Watchlist support~~ - Implemented via `monitor` command config watchlist
 - [ ] Persistence layer for investigation results
 - [ ] Export formats (CSV, JSON reports)
-- [ ] Real-time monitoring mode
+- [x] ~~Real-time monitoring mode~~ - Implemented via `monitor` command
 - [ ] Alert notifications (email, webhook, Discord)
 
 ### Auth Module
@@ -220,11 +219,8 @@ The subgraph client has advanced methods that aren't integrated into the main co
 - No console warnings - Clean build output
 
 ### Areas for Improvement
-- Unused auth module (orphaned code path)
 - Scripts directory has old debug/orphaned scripts
 - getTradesByTimeRange/Size methods implemented but not integrated
-- No real-time monitoring capability
-- Watchlist config field unused
 
 ---
 
@@ -257,12 +253,12 @@ The subgraph client has advanced methods that aren't integrated into the main co
 | Subgraph integration | Working | Primary data source |
 | Data API fallback | Working | With caching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 77/77 passing |
+| Test suite | Working | 200/200 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
-| Real-time monitoring | Not implemented | No event loop |
-| Watchlist feature | Not implemented | Config present but unused |
+| Real-time monitoring | Working | `monitor` command with WebSocket |
+| Watchlist feature | Working | Used by `monitor` command |
 | Auth for CLOB API | Not implemented | Module exists, not used |
 | Batch wallet analysis | Not implemented | Can only analyze one wallet |
 | Export formats | Not implemented | CLI only |
@@ -304,7 +300,7 @@ src/
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (14 test files, 77 tests)
+tests/ (20 test files, 200 tests)
 scripts/ (3 utilities)
 docs/ (Planning documents)
 ```
@@ -328,11 +324,11 @@ docs/ (Planning documents)
 - [ ] Whale Following signal
 - [ ] Batch wallet investigation command
 - [ ] Export formats (JSON/CSV)
-- [ ] Watchlist support
+- [x] ~~Watchlist support~~ - Implemented via `monitor` command config watchlist
 - [x] ~~**Market name resolution**~~ - Fixed! Uses Gamma API `clob_token_ids` param with repeated format.
 
 ### Advanced Features
-- [ ] Real-time monitoring mode
+- [x] ~~Real-time monitoring mode~~ - Implemented via `monitor` command
 - [ ] Alert notifications (webhooks, Discord, email)
 - [ ] Persistence layer for results
 - [ ] Web dashboard
