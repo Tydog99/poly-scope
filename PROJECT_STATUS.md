@@ -16,6 +16,7 @@ Last updated: 2026-01-07
    - Analyzes trades for a specific market (by slug or condition ID)
    - Filters by outcome, date range, minimum trade size
    - Supports `--all` flag for multi-market events
+   - `-w/--wallet` flag for targeted wallet analysis with verbose scoring output
    - Returns top 10 suspicious trades ranked by score
    - Gracefully handles both resolved and unresolved markets
 
