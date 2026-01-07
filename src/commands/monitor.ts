@@ -129,7 +129,13 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
           evaluator.cacheAccount(event.proxyWallet, account);
         }
       } catch (error) {
-        // Continue without account data
+        // Log in verbose mode, continue without account data
+        if (options.verbose) {
+          const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+          const walletShort = `${event.proxyWallet.slice(0, 6)}...${event.proxyWallet.slice(-4)}`;
+          const errMsg = error instanceof Error ? error.message : 'unknown error';
+          console.error(chalk.yellow(`[${time}] Failed to fetch account for ${walletShort}: ${errMsg}`));
+        }
       }
     }
 
