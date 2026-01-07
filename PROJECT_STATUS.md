@@ -107,7 +107,7 @@ Last updated: 2026-01-07
 
 | Module | Tests | Status | Notes |
 |--------|-------|--------|-------|
-| `config.test.ts` | 3 tests | Pass | Config loading, defaults, overrides |
+| `config.test.ts` | 4 tests | Pass | Config loading, defaults, overrides, monitor config |
 | `signals/tradeSize.test.ts` | 4 tests | Pass | Threshold, size scaling, market impact |
 | `signals/accountHistory.test.ts` | 10 tests | Pass | All scoring components, edge cases |
 | `signals/conviction.test.ts` | 4 tests | Pass | Concentration scoring |
@@ -369,3 +369,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
 | 2026-01-07 | Added `@polymarket/real-time-data-client` dependency (v1.4.0) for real-time monitoring feature |
 | 2026-01-07 | Added monitor type definitions (`src/monitor/types.ts`): RTDSTradeEvent, EvaluatedTrade, MonitorConfig, ConnectionState, MonitorOptions |
+| 2026-01-07 | Added monitor configuration to config system: maxReconnects, retryDelaySeconds, stabilityThresholdSeconds, backoff settings with defaults |
