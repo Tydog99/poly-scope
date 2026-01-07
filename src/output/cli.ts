@@ -61,7 +61,8 @@ export class CLIReporter {
     lines.push(chalk.gray('Weights: Size 40% | Acct 35% | Conv 25%'));
     lines.push('');
 
-    // Table header
+    // Table header - align with data columns
+    // Wallet addresses are 42 chars, so pad header to match
     const header = [
       chalk.bold('#'.padStart(3)),
       chalk.bold('Score'.padStart(6)),
@@ -1084,11 +1085,11 @@ export class CLIReporter {
       if (!report.suspiciousTrades || report.suspiciousTrades.length === 0) {
         lines.push(chalk.green('  ✓ No suspicious trades detected above threshold.'));
       } else {
-        // Table header
+        // Table header - align with data columns
         lines.push(
-          chalk.gray('  #   Score   Size   Acct   Conv   Time             Market                              Trade')
+          chalk.gray('  #    Score  Size  Acct  Conv  Time             Market                              Trade')
         );
-        lines.push(chalk.gray('  ' + '─'.repeat(110)));
+        lines.push(chalk.gray('  ' + '─'.repeat(105)));
 
         for (let i = 0; i < Math.min(report.suspiciousTrades.length, MAX_SUSPICIOUS_TRADES_DISPLAY); i++) {
           const st = report.suspiciousTrades[i];
