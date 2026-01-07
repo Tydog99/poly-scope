@@ -408,8 +408,10 @@ export class CLIReporter {
           : chalk.gray('held'.padStart(12));
         // Shares column - detect sync issue (redeemed but still has shares)
         let sharesStr: string;
+        let sharesSuffix = '';
         if (redemption > 0 && netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString() + chalk.yellow(' (unsynced)');
+          sharesStr = Math.round(netQty).toLocaleString();
+          sharesSuffix = chalk.yellow(' (unsynced)');
         } else if (netQty > 0) {
           sharesStr = Math.round(netQty).toLocaleString();
         } else if (redemption > 0) {
@@ -440,7 +442,7 @@ export class CLIReporter {
           : pos.marketId.slice(0, 16) + '...';
 
         lines.push(
-          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}  ${roiStr}`
+          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
         );
       }
 
