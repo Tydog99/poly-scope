@@ -1155,13 +1155,21 @@ export class CLIReporter {
 }
 
 /**
+ * Create OSC 8 terminal hyperlink to Polymarket profile
+ */
+function walletLink(wallet: string): string {
+  const profileUrl = `https://polymarket.com/profile/${wallet}`;
+  return `\x1b]8;;${profileUrl}\x07${wallet}\x1b]8;;\x07`;
+}
+
+/**
  * Format a trade for verbose monitor output
  * Color: YES = blue, NO = yellow
  */
 export function formatMonitorTrade(evaluated: EvaluatedTrade, useColors = true): string {
   const { event, score, isAlert } = evaluated;
   const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
-  const walletShort = `${event.proxyWallet.slice(0, 6)}...${event.proxyWallet.slice(-4)}`;
+  const walletDisplay = walletLink(event.proxyWallet);
   const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
 
   const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
@@ -1172,7 +1180,7 @@ export function formatMonitorTrade(evaluated: EvaluatedTrade, useColors = true):
   const scoreStr = useColors && isAlert ? chalk.red(score.toString()) : score.toString();
   const alertMarker = isAlert ? (useColors ? chalk.red(' ALERT') : ' ALERT') : '';
 
-  return `[${time}] ${event.slug} | ${walletShort} | ${event.side} $${valueUsd} ${outcomeColored} | Score: ${scoreStr}${alertMarker}`;
+  return `[${time}] ${event.slug} | ${walletDisplay} | ${event.side} $${valueUsd} ${outcomeColored} | Score: ${scoreStr}${alertMarker}`;
 }
 
 /**
@@ -1181,7 +1189,7 @@ export function formatMonitorTrade(evaluated: EvaluatedTrade, useColors = true):
 export function formatMonitorAlert(evaluated: EvaluatedTrade, marketQuestion: string): string {
   const { event, score, signals, account } = evaluated;
   const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
-  const walletShort = `${event.proxyWallet.slice(0, 6)}...${event.proxyWallet.slice(-4)}`;
+  const walletDisplay = walletLink(event.proxyWallet);
   const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
 
   const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
@@ -1195,7 +1203,7 @@ export function formatMonitorAlert(evaluated: EvaluatedTrade, marketQuestion: st
     '',
     chalk.red(`ALERT [${time}]`) + ' ' + '-'.repeat(50),
     `  Market:  ${marketQuestion}`,
-    `  Wallet:  ${walletShort} (${accountInfo})`,
+    `  Wallet:  ${walletDisplay} (${accountInfo})`,
     `  Trade:   ${event.side} $${valueUsd} ${outcomeColored} @ $${event.price.toFixed(2)}`,
     `  Score:   ${chalk.red(score.toString())}/100`,
     '',
