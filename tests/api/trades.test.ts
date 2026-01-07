@@ -322,4 +322,132 @@ describe('TradeFetcher', () => {
       expect(trades[0].id).toBe('old_trade');
     });
   });
+
+  describe('date filtering', () => {
+    // Timestamps for test trades spanning Jan 1-5, 2026
+    const JAN_1 = new Date('2026-01-01T12:00:00Z');
+    const JAN_2 = new Date('2026-01-02T12:00:00Z');
+    const JAN_3_MORNING = new Date('2026-01-03T08:00:00Z');
+    const JAN_3_EVENING = new Date('2026-01-03T20:00:00Z');
+    const JAN_4 = new Date('2026-01-04T12:00:00Z');
+    const JAN_5 = new Date('2026-01-05T12:00:00Z');
+
+    const makeTrade = (id: string, timestamp: Date) => ({
+      id,
+      marketId: 'market-1',
+      wallet: '0xwallet',
+      side: 'BUY' as const,
+      outcome: 'YES' as const,
+      size: 100,
+      price: 0.5,
+      timestamp,
+      valueUsd: 50,
+    });
+
+    const cachedTrades = [
+      makeTrade('jan1', JAN_1),
+      makeTrade('jan2', JAN_2),
+      makeTrade('jan3-am', JAN_3_MORNING),
+      makeTrade('jan3-pm', JAN_3_EVENING),
+      makeTrade('jan4', JAN_4),
+      makeTrade('jan5', JAN_5),
+    ];
+
+    it('filters trades after a given date', async () => {
+      const mockCache = createMockCache();
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: 'market-1',
+        newestTimestamp: JAN_5.getTime() / 1000,
+        oldestTimestamp: JAN_1.getTime() / 1000,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({ cache: mockCache });
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        after: new Date('2026-01-03T00:00:00Z'), // Start of Jan 3
+        maxTrades: 10,
+      });
+
+      // Should include Jan 3 morning, Jan 3 evening, Jan 4, Jan 5
+      expect(trades.map(t => t.id)).toEqual(['jan3-am', 'jan3-pm', 'jan4', 'jan5']);
+    });
+
+    it('filters trades before a given date', async () => {
+      const mockCache = createMockCache();
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: 'market-1',
+        newestTimestamp: JAN_5.getTime() / 1000,
+        oldestTimestamp: JAN_1.getTime() / 1000,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({ cache: mockCache });
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        before: new Date('2026-01-03T00:00:00Z'), // Midnight start of Jan 3
+        maxTrades: 10,
+      });
+
+      // Should include Jan 1, Jan 2 only (Jan 3 trades are AFTER midnight)
+      expect(trades.map(t => t.id)).toEqual(['jan1', 'jan2']);
+    });
+
+    it('filters trades with before set to end of day', async () => {
+      const mockCache = createMockCache();
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: 'market-1',
+        newestTimestamp: JAN_5.getTime() / 1000,
+        oldestTimestamp: JAN_1.getTime() / 1000,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({ cache: mockCache });
+      // End of Jan 3 (23:59:59.999)
+      const endOfJan3 = new Date('2026-01-03T23:59:59.999Z');
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        before: endOfJan3,
+        maxTrades: 10,
+      });
+
+      // Should include Jan 1, Jan 2, Jan 3 morning, Jan 3 evening
+      expect(trades.map(t => t.id)).toEqual(['jan1', 'jan2', 'jan3-am', 'jan3-pm']);
+    });
+
+    it('filters trades within a date range', async () => {
+      const mockCache = createMockCache();
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: 'market-1',
+        newestTimestamp: JAN_5.getTime() / 1000,
+        oldestTimestamp: JAN_1.getTime() / 1000,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({ cache: mockCache });
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        after: new Date('2026-01-02T00:00:00Z'),
+        before: new Date('2026-01-03T23:59:59.999Z'),
+        maxTrades: 10,
+      });
+
+      // Should include Jan 2, Jan 3 morning, Jan 3 evening
+      expect(trades.map(t => t.id)).toEqual(['jan2', 'jan3-am', 'jan3-pm']);
+    });
+
+    it('returns empty array when no trades match date range', async () => {
+      const mockCache = createMockCache();
+      (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
+        marketId: 'market-1',
+        newestTimestamp: JAN_5.getTime() / 1000,
+        oldestTimestamp: JAN_1.getTime() / 1000,
+        trades: cachedTrades,
+      });
+
+      const fetcher = new TradeFetcher({ cache: mockCache });
+      const trades = await fetcher.getTradesForMarket('market-1', {
+        after: new Date('2026-01-10T00:00:00Z'), // Way after all trades
+        maxTrades: 10,
+      });
+
+      expect(trades).toEqual([]);
+    });
+  });
 });

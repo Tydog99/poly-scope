@@ -65,7 +65,8 @@ program
         const report = await command.execute({
           marketId: market.conditionId,
           after: opts.after ? new Date(opts.after) : undefined,
-          before: opts.before ? new Date(opts.before) : undefined,
+          // Use end of day for --before (23:59:59.999) so "before 2026-01-03" includes all of Jan 3
+          before: opts.before ? new Date(new Date(opts.before).getTime() + 24 * 60 * 60 * 1000 - 1) : undefined,
           outcome: opts.outcome?.toUpperCase() as 'YES' | 'NO' | undefined,
           maxTrades: opts.maxTrades,
           topN: opts.top,
