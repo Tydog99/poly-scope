@@ -366,3 +366,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
 | 2026-01-07 | Added `TradeFill` and `AggregatedTrade` types for transaction-level trade aggregation |
 | 2026-01-07 | Added `aggregateFills` function in `src/api/aggregator.ts` with basic grouping by transaction hash |
+| 2026-01-07 | Added weighted average price test for aggregateFills in `tests/api/aggregator.test.ts` |

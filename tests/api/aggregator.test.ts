@@ -46,4 +46,39 @@ describe('aggregateFills', () => {
       expect(result[0].totalValueUsd).toBe(3000);
     });
   });
+
+  describe('price calculation', () => {
+    it('calculates weighted average price', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '1000000000', // $1000 at 0.10 = 10000 shares
+          price: '0.10',
+        },
+        {
+          id: '0xtx1-1',
+          transactionHash: '0xtx1',
+          timestamp: 1001,
+          maker: '0xmaker2',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '2000000000', // $2000 at 0.20 = 10000 shares
+          price: '0.20',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      // Total: $3000, 20000 shares → avg price = $3000/20000 = $0.15
+      expect(result[0].avgPrice).toBeCloseTo(0.15, 5);
+      expect(result[0].totalSize).toBeCloseTo(20000, 0);
+    });
+  });
 });
