@@ -172,4 +172,109 @@ describe('aggregateFills', () => {
       expect(result[0].complementaryValueUsd).toBe(5000);
     });
   });
+
+  describe('edge cases', () => {
+    it('handles single-fill transactions', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '1000000000',
+          price: '0.10',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].fillCount).toBe(1);
+      expect(result[0].fills).toHaveLength(1);
+    });
+
+    it('handles empty input', () => {
+      const result = aggregateFills([], baseOptions);
+      expect(result).toHaveLength(0);
+    });
+
+    it('handles multiple separate transactions', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '1000000000',
+          price: '0.10',
+        },
+        {
+          id: '0xtx2-0',
+          transactionHash: '0xtx2',
+          timestamp: 2000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '2000000000',
+          price: '0.20',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      expect(result).toHaveLength(2);
+      // Should be sorted by timestamp desc
+      expect(result[0].transactionHash).toBe('0xtx2');
+      expect(result[1].transactionHash).toBe('0xtx1');
+    });
+
+    it('correctly determines maker vs taker role', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xinsider', // Wallet is maker
+          taker: '0xother',
+          marketId: 'token-yes',
+          side: 'Sell', // Maker sells
+          size: '1000000000',
+          price: '0.10',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      expect(result[0].side).toBe('SELL'); // Maker's side matches
+      expect(result[0].fills[0].role).toBe('maker');
+    });
+
+    it('inverts side for taker', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xother',
+          taker: '0xinsider', // Wallet is taker
+          marketId: 'token-yes',
+          side: 'Sell', // Maker sells, so taker BUYS
+          size: '1000000000',
+          price: '0.10',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      expect(result[0].side).toBe('BUY'); // Taker's side is opposite
+      expect(result[0].fills[0].role).toBe('taker');
+    });
+  });
 });
