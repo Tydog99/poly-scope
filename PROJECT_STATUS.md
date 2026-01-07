@@ -10,7 +10,7 @@ Last updated: 2026-01-07
 - **Test Status**: All 200 tests passing across 20 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
-### Implemented Commands (2)
+### Implemented Commands (3)
 
 1. **`analyze`** - Market forensic analysis
    - Analyzes trades for a specific market (by slug or condition ID)
@@ -27,6 +27,15 @@ Last updated: 2026-01-07
    - Runs wallet's trades through the suspicious trade analyzer (same 3-signal system as `analyze`)
    - `--analyze-limit <n>` flag controls how many trades to analyze (default: 100, 0 to disable)
    - `-m/--market` flag filters to a specific market at the GraphQL query level (not post-fetch)
+
+3. **`monitor`** - Real-time monitoring (in progress)
+   - Connects to Polymarket WebSocket for live trade events
+   - Monitors one or more markets by slug
+   - Evaluates trades in real-time using the 3-signal system
+   - Session cache for account history (5-minute TTL)
+   - Exponential backoff reconnection with stability timer
+   - Supports `--min-size`, `--threshold`, `--verbose` flags
+   - Merges CLI markets with config watchlist
 
 ### Three Weighted Detection Signals
 
@@ -283,9 +292,11 @@ src/
 │   └── types.ts      - Signal types
 ├── commands/         (CLI commands)
 │   ├── analyze.ts    - Market analysis
-│   └── investigate.ts - Wallet investigation
+│   ├── investigate.ts - Wallet investigation
+│   └── monitor.ts    - Real-time monitoring command
 ├── monitor/          (Real-time monitoring)
 │   ├── stream.ts     - WebSocket wrapper with reconnection
+│   ├── evaluator.ts  - Real-time trade evaluator with session cache
 │   └── types.ts      - Monitor type definitions
 ├── output/           (Formatting)
 │   ├── cli.ts        - Terminal output
@@ -374,3 +385,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added WebSocket stream wrapper (`src/monitor/stream.ts`): MonitorStream class with exponential backoff reconnection, ConnectionStatus handling, stability timer for reset |
 | 2026-01-07 | Added trade evaluator (`src/monitor/evaluator.ts`): MonitorEvaluator class with session cache (5-min TTL), reuses existing signals (TradeSizeSignal, AccountHistorySignal, ConvictionSignal), normalizes RTDSTradeEvent to Trade type |
 | 2026-01-07 | Added monitor output formatters (`src/output/cli.ts`): `formatMonitorTrade()` for verbose trade lines, `formatMonitorAlert()` for full alert with signal breakdown, `formatMonitorBanner()` for startup display. YES=blue, NO=yellow colors. |
+| 2026-01-07 | Added monitor command (`src/commands/monitor.ts`): `executeMonitor()` ties together MonitorStream, MonitorEvaluator, AccountFetcher. Supports -m markets, --min-size, --threshold, --verbose flags. Graceful shutdown on SIGINT. Resolves slugs via SlugResolver before subscribing. |
