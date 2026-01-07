@@ -679,43 +679,165 @@ describe('CLIReporter', () => {
       });
     });
 
-    describe('redemptions section', () => {
-      it('shows redemptions with payouts', () => {
-        const report = createMockWalletReport({
-          positions: [createMockSubgraphPosition()],
-          redemptions: [
-            createMockSubgraphRedemption({
-              payout: '15000000000', // $15,000
-              conditionId: '0xcondition123',
-            }),
-          ],
-          resolvedMarkets: new Map(),
-        });
-        const output = reporter.formatWalletReport(report);
+    describe('realized gains in positions table', () => {
+      it('shows redemption amount in Realized column when position is redeemed', () => {
+        const tokenId = '12345678901234567890';
+        const conditionId = '0xcondition-matched';
 
-        expect(output).toContain('Redemptions');
-        expect(output).toContain('+$15,000');
-      });
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId, conditionId })],
+        ]);
 
-      it('limits redemptions display to 10', () => {
-        const redemptions = Array.from({ length: 15 }, (_, i) =>
-          createMockSubgraphRedemption({ id: `redemption-${i}` })
-        );
-
-        const report = createMockWalletReport({
-          positions: [createMockSubgraphPosition()],
-          redemptions,
-          resolvedMarkets: new Map(),
-        });
-        const output = reporter.formatWalletReport(report);
-
-        expect(output).toContain('and 5 more redemptions');
-      });
-
-      it('calculates total P&L from positions and redemptions', () => {
         const report = createMockWalletReport({
           positions: [
             createMockSubgraphPosition({
+              marketId: tokenId,
+              valueBought: '10000000000', // $10,000
+              valueSold: '0',
+              netQuantity: '0', // fully redeemed
+            }),
+          ],
+          redemptions: [
+            createMockSubgraphRedemption({
+              payout: '15000000000', // $15,000
+              conditionId: conditionId,
+            }),
+          ],
+          resolvedMarkets,
+        });
+
+        const output = reporter.formatWalletReport(report);
+
+        // Redemption should appear in the position row's Realized column
+        expect(output).toContain('+$15,000');
+        // Should NOT have separate Redemptions section
+        expect(output).not.toMatch(/Redemptions \(resolved market payouts\)/);
+      });
+
+      it('shows "-" in Realized column when position has no redemption', () => {
+        const tokenId = '12345678901234567890';
+
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId })],
+        ]);
+
+        const report = createMockWalletReport({
+          positions: [
+            createMockSubgraphPosition({
+              marketId: tokenId,
+              netQuantity: '50000000000', // still holding
+            }),
+          ],
+          redemptions: [], // no redemptions
+          resolvedMarkets,
+        });
+
+        const output = reporter.formatWalletReport(report);
+
+        // Position row should exist with market name
+        expect(output).toContain('Bitcoin');
+      });
+
+      it('shows (sync-issue) when redemption exists but shares remain', () => {
+        const tokenId = '12345678901234567890';
+        const conditionId = '0xcondition-sync-issue';
+
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId, conditionId })],
+        ]);
+
+        const report = createMockWalletReport({
+          positions: [
+            createMockSubgraphPosition({
+              marketId: tokenId,
+              valueBought: '10000000000',
+              netQuantity: '5000000000', // Still has shares!
+            }),
+          ],
+          redemptions: [
+            createMockSubgraphRedemption({
+              payout: '8000000000',
+              conditionId: conditionId,
+            }),
+          ],
+          resolvedMarkets,
+        });
+
+        const output = reporter.formatWalletReport(report);
+
+        expect(output).toContain('sync-issue');
+      });
+
+      it('shows "redeemed" in shares column when netQuantity is 0 and has redemption', () => {
+        const tokenId = '12345678901234567890';
+        const conditionId = '0xcondition-redeemed';
+
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId, conditionId })],
+        ]);
+
+        const report = createMockWalletReport({
+          positions: [
+            createMockSubgraphPosition({
+              marketId: tokenId,
+              netQuantity: '0', // no shares remaining
+            }),
+          ],
+          redemptions: [
+            createMockSubgraphRedemption({
+              payout: '10000000000',
+              conditionId: conditionId,
+            }),
+          ],
+          resolvedMarkets,
+        });
+
+        const output = reporter.formatWalletReport(report);
+
+        expect(output).toContain('redeemed');
+      });
+
+      it('aggregates multiple redemptions for same conditionId', () => {
+        const tokenId = '12345678901234567890';
+        const conditionId = '0xcondition-multi';
+
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId, conditionId })],
+        ]);
+
+        const report = createMockWalletReport({
+          positions: [
+            createMockSubgraphPosition({
+              marketId: tokenId,
+              valueBought: '5000000000',
+              netQuantity: '0',
+            }),
+          ],
+          redemptions: [
+            createMockSubgraphRedemption({ payout: '3000000000', conditionId }),
+            createMockSubgraphRedemption({ payout: '2000000000', conditionId }),
+          ],
+          resolvedMarkets,
+        });
+
+        const output = reporter.formatWalletReport(report);
+
+        // Should show aggregated $5,000 (3k + 2k)
+        expect(output).toContain('+$5,000');
+      });
+
+      it('calculates total P&L from positions and redemptions', () => {
+        const tokenId = '12345678901234567890';
+        const conditionId = '0xcondition123';
+
+        const resolvedMarkets = new Map<string, ResolvedToken>([
+          [tokenId, createMockResolvedToken({ tokenId, conditionId })],
+        ]);
+
+        const report = createMockWalletReport({
+          positions: [
+            createMockSubgraphPosition({
+              marketId: tokenId,
               valueBought: '10000000000', // $10,000 cost basis
               valueSold: '12000000000', // $12,000 sales → +$2,000 trading P&L
             }),
@@ -723,9 +845,10 @@ describe('CLIReporter', () => {
           redemptions: [
             createMockSubgraphRedemption({
               payout: '8000000000', // $8,000 redemption
+              conditionId: conditionId,
             }),
           ],
-          resolvedMarkets: new Map(),
+          resolvedMarkets,
         });
         const output = reporter.formatWalletReport(report);
 

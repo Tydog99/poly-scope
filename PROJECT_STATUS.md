@@ -352,3 +352,5 @@ docs/ (Planning documents)
 | 2026-01-06 | Fixed P&L calculation: now uses `valueSold - valueBought` instead of `netValue` directly (negative netValue = profit, was confusing) |
 | 2026-01-06 | Fixed trading P&L for held positions: shows "held" (not "unrealized") and counts as $0 P&L instead of negative cost basis |
 | 2026-01-06 | Added ROI column to Positions table: shows per-market ROI calculated from (valueSold + redemption - cost) / cost |
+| 2026-01-06 | Merged Redemptions into Positions table: realized gains now shown inline, removed separate Redemptions section |
+| 2026-01-06 | Added sync-issue detection: shows "(sync-issue)" when position has redemption but still shows remaining shares |

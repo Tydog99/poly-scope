@@ -18,7 +18,6 @@ const WALLET_COLORS: ChalkInstance[] = [
 
 // Display limits for report sections
 const MAX_POSITIONS_DISPLAY = 15;
-const MAX_REDEMPTIONS_DISPLAY = 10;
 const MAX_SUSPICIOUS_TRADES_DISPLAY = 20;
 
 interface WalletStats {
@@ -407,7 +406,24 @@ export class CLIReporter {
         const pnlStr = valueSold > 0
           ? pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12))
           : chalk.gray('held'.padStart(12));
-        const sharesStr = netQty > 0 ? `${Math.round(netQty).toLocaleString()}` : chalk.gray('closed');
+        // Shares column - detect sync issue (redeemed but still has shares)
+        let sharesStr: string;
+        if (redemption > 0 && netQty > 0) {
+          sharesStr = chalk.yellow('(sync-issue)');
+        } else if (netQty > 0) {
+          sharesStr = Math.round(netQty).toLocaleString();
+        } else if (redemption > 0) {
+          sharesStr = chalk.gray('redeemed');
+        } else if (valueSold > 0) {
+          sharesStr = chalk.gray('closed');
+        } else {
+          sharesStr = chalk.gray('-');
+        }
+
+        // Format realized gains (redemption payout for this market)
+        const realizedStr = redemption > 0
+          ? chalk.green(('+' + this.formatUsd(redemption)).padStart(12))
+          : chalk.gray('-'.padStart(12));
 
         // Format ROI - show "-" if position is still open (no sales, no redemption)
         let roiStr: string;
@@ -424,33 +440,12 @@ export class CLIReporter {
           : pos.marketId.slice(0, 16) + '...';
 
         lines.push(
-          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${chalk.gray('-'.padStart(12))}    ${sharesStr.padStart(10)}  ${roiStr}`
+          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}  ${roiStr}`
         );
       }
 
       if (report.positions.length > MAX_POSITIONS_DISPLAY) {
         lines.push(chalk.gray(`  ... and ${report.positions.length - MAX_POSITIONS_DISPLAY} more positions`));
-      }
-
-      // Show redemptions section if any
-      if (report.redemptions.length > 0) {
-        lines.push('');
-        lines.push(chalk.gray('  ' + '─'.repeat(106)));
-        lines.push(chalk.bold.green('  Redemptions (resolved market payouts):'));
-
-        for (const r of report.redemptions.slice(0, MAX_REDEMPTIONS_DISPLAY)) {
-          const payout = parseFloat(r.payout) / 1e6;
-          const date = new Date(r.timestamp * 1000);
-          const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
-
-          lines.push(
-            `  ${chalk.gray(dateStr.padEnd(38))} ${chalk.gray('-'.padStart(12))}    ${chalk.gray('-'.padStart(12))}    ${chalk.green(('+' + this.formatUsd(payout)).padStart(12))}    ${chalk.gray(r.conditionId.slice(0, 10) + '...')}`
-          );
-        }
-
-        if (report.redemptions.length > MAX_REDEMPTIONS_DISPLAY) {
-          lines.push(chalk.gray(`  ... and ${report.redemptions.length - MAX_REDEMPTIONS_DISPLAY} more redemptions`));
-        }
       }
 
       // Summary totals
