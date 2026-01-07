@@ -94,3 +94,39 @@ export interface SubgraphRedemption {
   payout: string; // BigInt as string, 6 decimals
   conditionId: string;
 }
+
+// Aggregated trade types
+
+export interface TradeFill {
+  id: string;              // Original fill ID (txHash-logIndex)
+  size: number;            // Shares in this fill
+  price: number;           // Price for this fill
+  valueUsd: number;        // USD value of this fill
+  timestamp: number;       // Unix timestamp
+  maker?: string;
+  taker?: string;
+  role?: 'maker' | 'taker';
+}
+
+export interface AggregatedTrade {
+  // Identity
+  transactionHash: string;  // Primary key for aggregation
+  marketId: string;         // Token ID (for subgraph) or condition ID
+  wallet: string;           // The wallet we're analyzing
+
+  // Aggregated values
+  side: 'BUY' | 'SELL';
+  outcome: 'YES' | 'NO';
+  totalSize: number;        // Sum of shares across fills
+  totalValueUsd: number;    // Sum of USD value
+  avgPrice: number;         // Weighted average price
+  timestamp: Date;          // Earliest fill timestamp
+
+  // Fill details (preserved for debugging/UI)
+  fills: TradeFill[];
+  fillCount: number;
+
+  // Complementary trade metadata (optional, for UI info)
+  hadComplementaryFills?: boolean;
+  complementaryValueUsd?: number;
+}
