@@ -738,7 +738,7 @@ describe('CLIReporter', () => {
         expect(output).toContain('Bitcoin');
       });
 
-      it('shows shares with (sync) flag when redemption exists but shares remain', () => {
+      it('shows shares with (unsynced) flag when redemption exists but shares remain', () => {
         const tokenId = '12345678901234567890';
         const conditionId = '0xcondition-sync-issue';
 
@@ -765,9 +765,9 @@ describe('CLIReporter', () => {
 
         const output = reporter.formatWalletReport(report);
 
-        // Should show both the share count and the sync flag
+        // Should show both the share count and the unsynced flag
         expect(output).toContain('5,000');
-        expect(output).toContain('sync');
+        expect(output).toContain('unsynced');
       });
 
       it('shows "redeemed" in shares column when netQuantity is 0 and has redemption', () => {

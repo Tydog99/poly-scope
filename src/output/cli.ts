@@ -409,7 +409,7 @@ export class CLIReporter {
         // Shares column - detect sync issue (redeemed but still has shares)
         let sharesStr: string;
         if (redemption > 0 && netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString() + chalk.yellow(' (sync)');
+          sharesStr = Math.round(netQty).toLocaleString() + chalk.yellow(' (unsynced)');
         } else if (netQty > 0) {
           sharesStr = Math.round(netQty).toLocaleString();
         } else if (redemption > 0) {
