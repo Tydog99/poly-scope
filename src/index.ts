@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { loadConfig } from './config.js';
 import { AnalyzeCommand } from './commands/analyze.js';
 import { InvestigateCommand } from './commands/investigate.js';
+import { executeMonitor } from './commands/monitor.js';
 import { CLIReporter } from './output/cli.js';
 import { SlugResolver } from './api/slug.js';
 
@@ -131,6 +132,26 @@ program
       console.error('Error:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
+  });
+
+program
+  .command('monitor')
+  .description('Watch markets in real-time for suspicious activity')
+  .option('-m, --market <slugs>', 'Comma-separated market slugs to watch', (val) => val.split(','))
+  .option('--min-size <usd>', 'Minimum trade size to evaluate', (val) => parseInt(val, 10), 5000)
+  .option('--threshold <score>', 'Alert threshold (0-100)', (val) => parseInt(val, 10), 70)
+  .option('--max-reconnects <n>', 'Max reconnection attempts', (val) => parseInt(val, 10), 10)
+  .option('--retry-delay <seconds>', 'Delay after max reconnects', (val) => parseInt(val, 10), 300)
+  .option('--verbose', 'Show all evaluated trades', false)
+  .action(async (options) => {
+    await executeMonitor({
+      markets: options.market || [],
+      minSize: options.minSize,
+      threshold: options.threshold,
+      maxReconnects: options.maxReconnects,
+      retryDelaySeconds: options.retryDelay,
+      verbose: options.verbose,
+    });
   });
 
 program.parse();

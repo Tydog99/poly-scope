@@ -19,4 +19,12 @@ describe('config', () => {
     expect(DEFAULT_CONFIG.conviction.minPositionPercent).toBe(80);
     expect(DEFAULT_CONFIG.alertThreshold).toBe(70);
   });
+
+  it('includes monitor config with defaults', () => {
+    const config = loadConfig();
+    expect(config.monitor).toBeDefined();
+    expect(config.monitor.maxReconnects).toBe(10);
+    expect(config.monitor.retryDelaySeconds).toBe(300);
+    expect(config.monitor.backoff.initialMs).toBe(1000);
+  });
 });

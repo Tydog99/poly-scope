@@ -1,5 +1,16 @@
 import { readFileSync, existsSync } from 'fs';
 
+export interface MonitorConfig {
+  maxReconnects: number;
+  retryDelaySeconds: number;
+  stabilityThresholdSeconds: number;
+  backoff: {
+    initialMs: number;
+    multiplier: number;
+    maxMs: number;
+  };
+}
+
 export interface Config {
   weights: {
     tradeSize: number;
@@ -46,6 +57,7 @@ export interface Config {
   tradeRole: 'taker' | 'maker' | 'both';
   alertThreshold: number;
   watchlist: string[];
+  monitor: MonitorConfig;
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -88,6 +100,16 @@ export const DEFAULT_CONFIG: Config = {
   tradeRole: 'taker', // Default to taker-only to avoid double-counting
   alertThreshold: 70,
   watchlist: [],
+  monitor: {
+    maxReconnects: 10,
+    retryDelaySeconds: 300,
+    stabilityThresholdSeconds: 60,
+    backoff: {
+      initialMs: 1000,
+      multiplier: 2,
+      maxMs: 30000,
+    },
+  },
 };
 
 export function loadConfig(path: string = './config.json'): Config {
@@ -108,5 +130,10 @@ export function loadConfig(path: string = './config.json'): Config {
     classification: { ...DEFAULT_CONFIG.classification, ...userConfig.classification },
     filters: { ...DEFAULT_CONFIG.filters, ...userConfig.filters },
     subgraph: { ...DEFAULT_CONFIG.subgraph, ...userConfig.subgraph },
+    monitor: {
+      ...DEFAULT_CONFIG.monitor,
+      ...userConfig.monitor,
+      backoff: { ...DEFAULT_CONFIG.monitor.backoff, ...userConfig.monitor?.backoff },
+    },
   };
 }

@@ -1,6 +1,7 @@
 import chalk, { type ChalkInstance } from 'chalk';
 import type { AnalysisReport, SuspiciousTrade } from './types.js';
 import type { WalletReport } from '../commands/investigate.js';
+import type { EvaluatedTrade } from '../monitor/types.js';
 
 // Colors for repeat wallets (excluding cyan which is for single-appearance)
 const WALLET_COLORS: ChalkInstance[] = [
@@ -92,7 +93,7 @@ export class CLIReporter {
       repeatWallets.forEach(({ wallet, stats }, idx) => {
         const arrow = idx === 0 ? chalk.red(' ← top suspect') : '';
         lines.push(
-          `  ${stats.color(wallet)}  ` +
+          `  ${stats.color(this.formatWalletLink(wallet))}  ` +
           `${String(stats.count).padStart(2)} trades  ` +
           `${this.formatUsd(stats.totalVolume).padStart(12)} total` +
           arrow
@@ -116,7 +117,7 @@ export class CLIReporter {
     // === PART A: Account Header ===
     lines.push('');
     lines.push(chalk.bold('═'.repeat(70)));
-    lines.push(chalk.bold(`Wallet Analysis: ${this.truncateWallet(wallet, false)} on "${this.truncateQuestion(report.market.question, 50)}"`));
+    lines.push(chalk.bold(`Wallet Analysis: ${this.formatWalletLink(wallet)} on "${this.truncateQuestion(report.market.question, 50)}"`));
     lines.push(chalk.bold('═'.repeat(70)));
     lines.push('');
 
@@ -355,7 +356,7 @@ export class CLIReporter {
       String(acctScore).padStart(3) + '/100',
       String(convScore).padStart(3) + '/100',
       chalk.gray(this.formatTime(st.trade.timestamp)),
-      walletColor(this.truncateWallet(st.trade.wallet).padEnd(12)),
+      walletColor(this.formatWalletLink(st.trade.wallet)),
       `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
       tags,
     ];
@@ -396,8 +397,9 @@ export class CLIReporter {
       lines.push(`    ${badges}`);
     }
 
-    lines.push(`    Wallet: ${chalk.cyan(this.truncateWallet(st.trade.wallet))}`);
+    lines.push(`    Wallet: ${chalk.cyan(this.formatWalletLink(st.trade.wallet))}`);
     lines.push(`    Trade: ${this.formatUsd(st.trade.valueUsd)} ${st.trade.outcome} @ ${st.trade.price.toFixed(2)}`);
+
 
     if (st.priceImpact) {
       lines.push(`    Impact: ${st.priceImpact.before.toFixed(2)} → ${st.priceImpact.after.toFixed(2)} (+${st.priceImpact.changePercent}%)`);
@@ -487,16 +489,21 @@ export class CLIReporter {
     return lines.join('\n');
   }
 
+  formatWalletLink(wallet: string): string {
+    // OSC 8 terminal hyperlink to Polymarket profile
+    // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
+    const profileUrl = `https://polymarket.com/profile/${wallet}`;
+    return `\x1b]8;;${profileUrl}\x07${wallet}\x1b]8;;\x07`;
+  }
+
   truncateWallet(wallet: string, linkable = true): string {
     if (wallet.length <= 10) return wallet;
-    const truncated = `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
 
     if (linkable) {
-      // OSC 8 terminal hyperlink - displays truncated but copies full address
-      // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
-      return `\x1b]8;;${wallet}\x07${truncated}\x1b]8;;\x07`;
+      // Full wallet as hyperlink to Polymarket profile
+      return this.formatWalletLink(wallet);
     }
-    return truncated;
+    return wallet;
   }
 
   private truncateQuestion(question: string, maxLen: number): string {
@@ -516,7 +523,7 @@ export class CLIReporter {
     lines.push(chalk.bold('Wallet Investigation Report'));
     lines.push(chalk.gray('━'.repeat(50)));
     lines.push('');
-    lines.push(`Wallet: ${chalk.cyan(report.wallet)}`);
+    lines.push(`Wallet: ${chalk.cyan(this.formatWalletLink(report.wallet))}`);
     lines.push(`Data Source: ${chalk.gray(report.dataSource)}`);
     if (report.marketSummary) {
       lines.push(`Market: ${chalk.cyan(report.marketSummary.marketName)}`);
@@ -1145,4 +1152,81 @@ export class CLIReporter {
 
     return '  ' + cols.join('  ');
   }
+}
+
+/**
+ * Create OSC 8 terminal hyperlink to Polymarket profile
+ */
+function walletLink(wallet: string): string {
+  const profileUrl = `https://polymarket.com/profile/${wallet}`;
+  return `\x1b]8;;${profileUrl}\x07${wallet}\x1b]8;;\x07`;
+}
+
+/**
+ * Format a trade for verbose monitor output
+ * Color: YES = blue, NO = yellow
+ */
+export function formatMonitorTrade(evaluated: EvaluatedTrade, useColors = true): string {
+  const { event, score, isAlert } = evaluated;
+  const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
+  const walletDisplay = walletLink(event.proxyWallet);
+  const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
+  const outcomeColored = useColors
+    ? (outcome === 'YES' ? chalk.blue(outcome) : chalk.yellow(outcome))
+    : outcome;
+
+  const scoreStr = useColors && isAlert ? chalk.red(score.toString()) : score.toString();
+  const alertMarker = isAlert ? (useColors ? chalk.red(' ALERT') : ' ALERT') : '';
+
+  return `[${time}] ${event.slug} | ${walletDisplay} | ${event.side} $${valueUsd} ${outcomeColored} | Score: ${scoreStr}${alertMarker}`;
+}
+
+/**
+ * Format a full alert with signal breakdown
+ */
+export function formatMonitorAlert(evaluated: EvaluatedTrade, marketQuestion: string): string {
+  const { event, score, signals, account } = evaluated;
+  const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
+  const walletDisplay = walletLink(event.proxyWallet);
+  const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
+  const outcomeColored = outcome === 'YES' ? chalk.blue(outcome) : chalk.yellow(outcome);
+
+  const accountInfo = account
+    ? `${account.totalTrades} trades`
+    : 'unknown history';
+
+  const lines = [
+    '',
+    chalk.red(`ALERT [${time}]`) + ' ' + '-'.repeat(50),
+    `  Market:  ${marketQuestion}`,
+    `  Wallet:  ${walletDisplay} (${accountInfo})`,
+    `  Trade:   ${event.side} $${valueUsd} ${outcomeColored} @ $${event.price.toFixed(2)}`,
+    `  Score:   ${chalk.red(score.toString())}/100`,
+    '',
+    '  Signals:',
+    `    Trade Size:      ${signals.tradeSize.score}/100 (${signals.tradeSize.weight}%) -> ${signals.tradeSize.weighted.toFixed(1)}`,
+    `    Account History: ${signals.accountHistory.score}/100 (${signals.accountHistory.weight}%) -> ${signals.accountHistory.weighted.toFixed(1)}`,
+    `    Conviction:      ${signals.conviction.score}/100 (${signals.conviction.weight}%) -> ${signals.conviction.weighted.toFixed(1)}`,
+    '-'.repeat(68),
+  ];
+
+  return lines.join('\n');
+}
+
+/**
+ * Format monitor startup banner
+ */
+export function formatMonitorBanner(markets: string[], threshold: number, minSize: number): string {
+  const lines = [
+    '+' + '-'.repeat(66) + '+',
+    '|  ' + chalk.bold('POLYMARKET MONITOR') + ' '.repeat(47) + '|',
+    `|  Watching ${markets.length} market${markets.length === 1 ? '' : 's'} for suspicious activity` + ' '.repeat(Math.max(0, 28 - markets.length.toString().length)) + '|',
+    `|  Alert threshold: ${threshold} | Min size: $${minSize.toLocaleString()}` + ' '.repeat(Math.max(0, 30 - threshold.toString().length - minSize.toLocaleString().length)) + '|',
+    '+' + '-'.repeat(66) + '+',
+  ];
+  return lines.join('\n');
 }
