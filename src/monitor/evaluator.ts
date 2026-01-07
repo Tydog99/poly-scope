@@ -107,7 +107,7 @@ export class MonitorEvaluator {
       marketId: event.asset,
       wallet: event.proxyWallet,
       side: event.side,
-      outcome: event.outcome.toUpperCase() === 'YES' ? 'YES' : 'NO',
+      outcome: event.outcomeIndex === 0 ? 'Yes' : 'No',
       size: event.size,
       price: event.price,
       timestamp: new Date(event.timestamp * 1000),

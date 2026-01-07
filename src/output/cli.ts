@@ -1194,9 +1194,9 @@ export function formatMonitorAlert(evaluated: EvaluatedTrade, marketQuestion: st
     `  Score:   ${chalk.red(score.toString())}/100`,
     '',
     '  Signals:',
-    `    Trade Size:      ${signals.tradeSize.score}/100 (${Math.round(signals.tradeSize.weight * 100)}%) -> ${signals.tradeSize.weighted.toFixed(1)}`,
-    `    Account History: ${signals.accountHistory.score}/100 (${Math.round(signals.accountHistory.weight * 100)}%) -> ${signals.accountHistory.weighted.toFixed(1)}`,
-    `    Conviction:      ${signals.conviction.score}/100 (${Math.round(signals.conviction.weight * 100)}%) -> ${signals.conviction.weighted.toFixed(1)}`,
+    `    Trade Size:      ${signals.tradeSize.score}/100 (${signals.tradeSize.weight}%) -> ${signals.tradeSize.weighted.toFixed(1)}`,
+    `    Account History: ${signals.accountHistory.score}/100 (${signals.accountHistory.weight}%) -> ${signals.accountHistory.weighted.toFixed(1)}`,
+    `    Conviction:      ${signals.conviction.score}/100 (${signals.conviction.weight}%) -> ${signals.conviction.weighted.toFixed(1)}`,
     '-'.repeat(68),
   ];
 

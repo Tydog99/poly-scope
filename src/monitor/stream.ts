@@ -126,6 +126,9 @@ export class MonitorStream extends EventEmitter {
 
       await this.sleep(this.config.retryDelaySeconds * 1000);
 
+      // Check if stopped during sleep
+      if (this.stopped) return;
+
       // Reset and try again
       this.reconnectAttempts = 0;
       await this.connect();
