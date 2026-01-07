@@ -372,3 +372,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added monitor type definitions (`src/monitor/types.ts`): RTDSTradeEvent, EvaluatedTrade, MonitorConfig, ConnectionState, MonitorOptions |
 | 2026-01-07 | Added monitor configuration to config system: maxReconnects, retryDelaySeconds, stabilityThresholdSeconds, backoff settings with defaults |
 | 2026-01-07 | Added WebSocket stream wrapper (`src/monitor/stream.ts`): MonitorStream class with exponential backoff reconnection, ConnectionStatus handling, stability timer for reset |
+| 2026-01-07 | Added trade evaluator (`src/monitor/evaluator.ts`): MonitorEvaluator class with session cache (5-min TTL), reuses existing signals (TradeSizeSignal, AccountHistorySignal, ConvictionSignal), normalizes RTDSTradeEvent to Trade type | |
