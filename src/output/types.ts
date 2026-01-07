@@ -19,4 +19,7 @@ export interface AnalysisReport {
   analyzedTrades: number;
   suspiciousTrades: SuspiciousTrade[];
   analyzedAt: Date;
+  // Wallet mode fields
+  targetWallet?: string;
+  targetAccountHistory?: import('../signals/types.js').AccountHistory;
 }

@@ -99,6 +99,23 @@ export class AnalyzeCommand {
       tradesToAnalyze = allTrades;
     }
 
+    // Filter to specific wallet if requested
+    if (options.wallet) {
+      const walletLower = options.wallet.toLowerCase();
+      tradesToAnalyze = tradesToAnalyze.filter(t =>
+        t.wallet.toLowerCase() === walletLower
+      );
+      console.log(`Filtered to ${tradesToAnalyze.length} trades for wallet ${options.wallet.slice(0, 8)}...`);
+    }
+
+    // === WALLET MODE: Fetch target account upfront ===
+    let targetAccountHistory: import('../signals/types.js').AccountHistory | undefined;
+    if (options.wallet) {
+      console.log(`Fetching account history for ${options.wallet.slice(0, 8)}...`);
+      const histories = await this.accountFetcher.getAccountHistoryBatch([options.wallet]);
+      targetAccountHistory = histories.get(options.wallet.toLowerCase());
+    }
+
     // === PHASE 1: Quick score all trades, collect candidate wallets ===
     console.log(`Phase 1: Quick scoring ${tradesToAnalyze.length} trades...`);
 
@@ -120,7 +137,9 @@ export class AnalyzeCommand {
       }
 
       // Filter out safe bets (high price buys/sells on resolved markets)
+      // Skip in wallet mode - show all trades for the wallet
       if (
+        !options.wallet &&
         this.config.filters.excludeSafeBets &&
         trade.price >= this.config.filters.safeBetThreshold &&
         (trade.side === 'BUY' || trade.side === 'SELL')
@@ -139,10 +158,13 @@ export class AnalyzeCommand {
       quickScores.push({ trade, quickScore: quickScore.total, quickResults });
 
       // Collect wallets from trades that might be suspicious
-      // Use alertThreshold - 10 to ensure we fetch data for all potentially flagged trades
-      const candidateThreshold = Math.max(40, this.config.alertThreshold - 10);
-      if (quickScore.total >= candidateThreshold) {
-        candidateWallets.add(trade.wallet.toLowerCase());
+      // In wallet mode, we've already fetched the account, so skip candidate collection
+      if (!options.wallet) {
+        // Use alertThreshold - 10 to ensure we fetch data for all potentially flagged trades
+        const candidateThreshold = Math.max(40, this.config.alertThreshold - 10);
+        if (quickScore.total >= candidateThreshold) {
+          candidateWallets.add(trade.wallet.toLowerCase());
+        }
       }
     }
 
@@ -150,18 +172,24 @@ export class AnalyzeCommand {
     console.log(`  Found ${candidateWallets.size} unique candidate wallets (${safeBetsFiltered} safe bets filtered at ≥${thresholdPct}%)`);
 
     // === PHASE 2: Batch fetch all candidate account histories ===
-    console.log(`Phase 2: Fetching account histories for ${candidateWallets.size} wallets...`);
+    // Skip in wallet mode - we already fetched the target account
+    let accountHistories = new Map<string, import('../signals/types.js').AccountHistory>();
+    if (!options.wallet && candidateWallets.size > 0) {
+      console.log(`Phase 2: Fetching account histories for ${candidateWallets.size} wallets...`);
 
-    const accountHistories = await this.accountFetcher.getAccountHistoryBatch(
-      [...candidateWallets]
-    );
+      accountHistories = await this.accountFetcher.getAccountHistoryBatch(
+        [...candidateWallets]
+      );
 
-    const cacheHits = [...accountHistories.values()].filter(h => h.dataSource === 'cache').length;
-    const subgraphHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph').length;
-    const subgraphTradesHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph-trades').length;
-    const apiHits = [...accountHistories.values()].filter(h => h.dataSource === 'data-api').length;
+      const cacheHits = [...accountHistories.values()].filter(h => h.dataSource === 'cache').length;
+      const subgraphHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph').length;
+      const subgraphTradesHits = [...accountHistories.values()].filter(h => h.dataSource === 'subgraph-trades').length;
+      const apiHits = [...accountHistories.values()].filter(h => h.dataSource === 'data-api').length;
 
-    console.log(`  Fetched ${accountHistories.size} accounts (${cacheHits} cached, ${subgraphHits} subgraph, ${subgraphTradesHits} fixed, ${apiHits} API)`);
+      console.log(`  Fetched ${accountHistories.size} accounts (${cacheHits} cached, ${subgraphHits} subgraph, ${subgraphTradesHits} fixed, ${apiHits} API)`);
+    } else if (!options.wallet) {
+      console.log(`Phase 2: No candidate wallets to fetch`);
+    }
 
     // === PHASE 3: Final scoring with account data ===
     console.log(`Phase 3: Final scoring with account histories...`);
@@ -175,8 +203,10 @@ export class AnalyzeCommand {
         console.log(`  Final scored ${i + 1}/${quickScores.length}`);
       }
 
-      // Get account history if we fetched it (for high-scoring trades)
-      const accountHistory = accountHistories.get(trade.wallet.toLowerCase());
+      // Get account history - in wallet mode use pre-fetched, otherwise lookup from batch
+      const accountHistory = options.wallet
+        ? targetAccountHistory
+        : accountHistories.get(trade.wallet.toLowerCase());
 
       // Final score with all context
       const fullContext: SignalContext = {
@@ -188,7 +218,9 @@ export class AnalyzeCommand {
       );
       const finalScore = this.aggregator.aggregate(fullResults);
 
-      if (finalScore.isAlert) {
+      // In wallet mode: collect ALL trades for verbose output
+      // In normal mode: only collect alerts
+      if (options.wallet || finalScore.isAlert) {
         const suspiciousTrade: SuspiciousTrade = {
           trade,
           score: finalScore,
@@ -217,8 +249,13 @@ export class AnalyzeCommand {
       market,
       totalTrades: allTrades.length,
       analyzedTrades: tradesToAnalyze.length,
-      suspiciousTrades: scoredTrades.slice(0, options.topN ?? 50),
+      suspiciousTrades: options.wallet
+        ? scoredTrades  // Return all trades in wallet mode
+        : scoredTrades.slice(0, options.topN ?? 50),
       analyzedAt: new Date(),
+      // Add wallet-specific fields for output formatting
+      targetWallet: options.wallet,
+      targetAccountHistory: options.wallet ? targetAccountHistory : undefined,
     };
   }
 }
