@@ -81,4 +81,95 @@ describe('aggregateFills', () => {
       expect(result[0].totalSize).toBeCloseTo(20000, 0);
     });
   });
+
+  describe('complementary trade filtering', () => {
+    it('filters complementary trades when tx has both YES and NO (smaller value)', () => {
+      const fills: SubgraphTrade[] = [
+        // YES side: $5000
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '5000000000',
+          price: '0.10',
+        },
+        // NO side: $500 (complementary - smaller)
+        {
+          id: '0xtx1-1',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker2',
+          taker: '0xinsider',
+          marketId: 'token-no',
+          side: 'Sell',
+          size: '500000000',
+          price: '0.90',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      // Should only have YES trade, NO filtered as complementary
+      expect(result).toHaveLength(1);
+      expect(result[0].outcome).toBe('YES');
+      expect(result[0].totalValueUsd).toBe(5000);
+      expect(result[0].hadComplementaryFills).toBe(true);
+      expect(result[0].complementaryValueUsd).toBe(500);
+    });
+
+    it('uses position to determine complementary when wallet has YES position', () => {
+      const fills: SubgraphTrade[] = [
+        {
+          id: '0xtx1-0',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker1',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '1000000000', // $1000 YES
+          price: '0.10',
+        },
+        {
+          id: '0xtx1-1',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmaker2',
+          taker: '0xinsider',
+          marketId: 'token-no',
+          side: 'Sell',
+          size: '5000000000', // $5000 NO (larger, but complementary due to position)
+          price: '0.90',
+        },
+      ];
+
+      const optionsWithPosition = {
+        ...baseOptions,
+        walletPositions: [
+          {
+            id: 'pos1',
+            marketId: 'token-yes',
+            valueBought: '10000000000',
+            valueSold: '0',
+            netValue: '10000000000',
+            quantityBought: '100000000000',
+            quantitySold: '0',
+            netQuantity: '100000000000', // Has YES position
+          },
+        ],
+      };
+
+      const result = aggregateFills(fills, optionsWithPosition);
+
+      // YES should be kept (matches position), NO filtered
+      expect(result).toHaveLength(1);
+      expect(result[0].outcome).toBe('YES');
+      expect(result[0].hadComplementaryFills).toBe(true);
+      expect(result[0].complementaryValueUsd).toBe(5000);
+    });
+  });
 });

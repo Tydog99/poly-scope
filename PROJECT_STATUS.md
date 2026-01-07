@@ -7,7 +7,7 @@ Last updated: 2026-01-07
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 143 tests passing across 14 test files
+- **Test Status**: All 194 tests passing across 18 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (2)
@@ -367,3 +367,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added `TradeFill` and `AggregatedTrade` types for transaction-level trade aggregation |
 | 2026-01-07 | Added `aggregateFills` function in `src/api/aggregator.ts` with basic grouping by transaction hash |
 | 2026-01-07 | Added weighted average price test for aggregateFills in `tests/api/aggregator.test.ts` |
+| 2026-01-07 | Added complementary trade detection to aggregator: filters smaller USD value side when tx has both YES/NO, uses position data to override when wallet has directional position |
