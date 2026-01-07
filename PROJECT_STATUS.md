@@ -221,8 +221,9 @@ The subgraph client has advanced methods that aren't integrated into the main co
 
 ## 7. Dependency Analysis
 
-**Production Dependencies** (5):
+**Production Dependencies** (6):
 - `@polymarket/clob-client` - Official Polymarket SDK
+- `@polymarket/real-time-data-client` - WebSocket client for real-time trade data
 - `chalk` - Terminal colors
 - `commander` - CLI argument parsing
 - `dotenv` - Environment variable loading
@@ -364,3 +365,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added trade count caching to `.cache/trade-counts/` with incremental saves after each batch |
 | 2026-01-07 | Added `-w/--wallet` filter to analyze command: filters trades to specific wallet, shows all trades (not just alerts), skips safe bet filter |
 | 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
+| 2026-01-07 | Added `@polymarket/real-time-data-client` dependency (v1.4.0) for real-time monitoring feature |
