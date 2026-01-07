@@ -22,6 +22,11 @@ export interface AnalyzeOptions {
    * - 'both': Include both (may double-count volume)
    */
   role?: 'taker' | 'maker' | 'both';
+  /**
+   * Filter to a specific wallet's trades.
+   * When set, ignores min-size and topN limits, shows verbose scoring output.
+   */
+  wallet?: string;
 }
 
 export class AnalyzeCommand {

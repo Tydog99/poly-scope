@@ -30,6 +30,7 @@ program
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
   .option('--no-cache', 'Disable account/redemption caching (cache is ON by default)')
   .option('--role <taker|maker|both>', 'Filter trades by participant role (default: taker to avoid double-counting)')
+  .option('-w, --wallet <address>', 'Analyze a specific wallet\'s trades on this market (shows all trades with verbose scoring)')
   .option('--debug', 'Show detailed score breakdowns for each trade')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
@@ -59,6 +60,12 @@ program
         return;
       }
 
+      // Validate -w is not used with --all
+      if (opts.wallet && opts.all) {
+        console.error('Error: --wallet (-w) cannot be used with --all flag');
+        process.exit(1);
+      }
+
       for (const market of markets) {
         console.log(`Analyzing: ${market.question}...\n`);
 
@@ -71,6 +78,7 @@ program
           maxTrades: opts.maxTrades,
           topN: opts.top,
           role: opts.role as 'taker' | 'maker' | 'both' | undefined,
+          wallet: opts.wallet,
         });
 
         console.log(reporter.formatAnalysisReport(report));
