@@ -33,6 +33,12 @@ npm run dev -- analyze -m <market> --threshold 50
 # Limit results shown (default: 50)
 npm run dev -- analyze -m <market> --top 10
 
+# Analyze a specific wallet's trades on a market (verbose scoring output)
+npm run dev -- analyze -m <market> -w 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
+
+# Wallet analysis with filters (shows all wallet trades, ignores min-size)
+npm run dev -- analyze -m <market> -w <wallet> --after 2026-01-01 --role both
+
 # Investigate a specific wallet
 npm run dev -- investigate -w 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
 
