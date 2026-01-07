@@ -374,3 +374,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Updated AccountHistorySignal to use AggregatedTrade type (Task 9); 23 tests pass |
 | 2026-01-07 | Updated ConvictionSignal to use AggregatedTrade: valueUsd -> totalValueUsd, simplified scoring with concentration-based thresholds |
 | 2026-01-07 | Updated output types (SuspiciousTrade, AnalysisReport) to use AggregatedTrade instead of Trade type |
+| 2026-01-07 | Updated CLI output to use AggregatedTrade fields: valueUsd -> totalValueUsd, price -> avgPrice |
