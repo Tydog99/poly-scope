@@ -93,7 +93,7 @@ export class CLIReporter {
       repeatWallets.forEach(({ wallet, stats }, idx) => {
         const arrow = idx === 0 ? chalk.red(' ← top suspect') : '';
         lines.push(
-          `  ${stats.color(wallet)}  ` +
+          `  ${stats.color(this.formatWalletLink(wallet))}  ` +
           `${String(stats.count).padStart(2)} trades  ` +
           `${this.formatUsd(stats.totalVolume).padStart(12)} total` +
           arrow
@@ -117,7 +117,7 @@ export class CLIReporter {
     // === PART A: Account Header ===
     lines.push('');
     lines.push(chalk.bold('═'.repeat(70)));
-    lines.push(chalk.bold(`Wallet Analysis: ${this.truncateWallet(wallet, false)} on "${this.truncateQuestion(report.market.question, 50)}"`));
+    lines.push(chalk.bold(`Wallet Analysis: ${this.formatWalletLink(wallet)} on "${this.truncateQuestion(report.market.question, 50)}"`));
     lines.push(chalk.bold('═'.repeat(70)));
     lines.push('');
 
@@ -356,7 +356,7 @@ export class CLIReporter {
       String(acctScore).padStart(3) + '/100',
       String(convScore).padStart(3) + '/100',
       chalk.gray(this.formatTime(st.trade.timestamp)),
-      walletColor(this.truncateWallet(st.trade.wallet).padEnd(12)),
+      walletColor(this.formatWalletLink(st.trade.wallet)),
       `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
       tags,
     ];
@@ -397,8 +397,9 @@ export class CLIReporter {
       lines.push(`    ${badges}`);
     }
 
-    lines.push(`    Wallet: ${chalk.cyan(this.truncateWallet(st.trade.wallet))}`);
+    lines.push(`    Wallet: ${chalk.cyan(this.formatWalletLink(st.trade.wallet))}`);
     lines.push(`    Trade: ${this.formatUsd(st.trade.valueUsd)} ${st.trade.outcome} @ ${st.trade.price.toFixed(2)}`);
+
 
     if (st.priceImpact) {
       lines.push(`    Impact: ${st.priceImpact.before.toFixed(2)} → ${st.priceImpact.after.toFixed(2)} (+${st.priceImpact.changePercent}%)`);
@@ -488,16 +489,21 @@ export class CLIReporter {
     return lines.join('\n');
   }
 
+  formatWalletLink(wallet: string): string {
+    // OSC 8 terminal hyperlink to Polymarket profile
+    // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
+    const profileUrl = `https://polymarket.com/profile/${wallet}`;
+    return `\x1b]8;;${profileUrl}\x07${wallet}\x1b]8;;\x07`;
+  }
+
   truncateWallet(wallet: string, linkable = true): string {
     if (wallet.length <= 10) return wallet;
-    const truncated = `${wallet.slice(0, 6)}...${wallet.slice(-2)}`;
 
     if (linkable) {
-      // OSC 8 terminal hyperlink - displays truncated but copies full address
-      // Format: \x1b]8;;URL\x07DISPLAYED_TEXT\x1b]8;;\x07
-      return `\x1b]8;;${wallet}\x07${truncated}\x1b]8;;\x07`;
+      // Full wallet as hyperlink to Polymarket profile
+      return this.formatWalletLink(wallet);
     }
-    return truncated;
+    return wallet;
   }
 
   private truncateQuestion(question: string, maxLen: number): string {
@@ -517,7 +523,7 @@ export class CLIReporter {
     lines.push(chalk.bold('Wallet Investigation Report'));
     lines.push(chalk.gray('━'.repeat(50)));
     lines.push('');
-    lines.push(`Wallet: ${chalk.cyan(report.wallet)}`);
+    lines.push(`Wallet: ${chalk.cyan(this.formatWalletLink(report.wallet))}`);
     lines.push(`Data Source: ${chalk.gray(report.dataSource)}`);
     if (report.marketSummary) {
       lines.push(`Market: ${chalk.cyan(report.marketSummary.marketName)}`);

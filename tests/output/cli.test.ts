@@ -194,9 +194,9 @@ describe('CLIReporter', () => {
   });
 
   describe('truncateWallet', () => {
-    it('truncates long wallet addresses', () => {
-      const truncated = reporter.truncateWallet('0x1234567890abcdef1234567890abcdef12345678', false);
-      expect(truncated).toBe('0x1234...78');
+    it('returns full wallet address when linkable is false', () => {
+      const result = reporter.truncateWallet('0x1234567890abcdef1234567890abcdef12345678', false);
+      expect(result).toBe('0x1234567890abcdef1234567890abcdef12345678');
     });
 
     it('preserves short addresses (10 chars or less)', () => {
@@ -204,20 +204,22 @@ describe('CLIReporter', () => {
       expect(reporter.truncateWallet('0x12345678', false)).toBe('0x12345678'); // 10 chars - boundary
     });
 
-    it('truncates addresses longer than 10 chars', () => {
-      // 11 chars - should be truncated
-      expect(reporter.truncateWallet('0x123456789', false)).toBe('0x1234...89'); // 11 chars
-      expect(reporter.truncateWallet('0x1234567890', false)).toBe('0x1234...90'); // 12 chars
+    it('returns full address for any length when linkable is false', () => {
+      // Full address returned (no truncation)
+      expect(reporter.truncateWallet('0x123456789', false)).toBe('0x123456789');
+      expect(reporter.truncateWallet('0x1234567890', false)).toBe('0x1234567890');
+      expect(reporter.truncateWallet('0x1234567890abcdef1234567890abcdef12345678', false))
+        .toBe('0x1234567890abcdef1234567890abcdef12345678');
     });
 
-    it('adds OSC 8 hyperlink when linkable is true', () => {
+    it('adds OSC 8 hyperlink to Polymarket profile when linkable is true', () => {
       const linked = reporter.truncateWallet('0x1234567890abcdef1234567890abcdef12345678', true);
 
-      // Should contain the truncated display text
-      expect(linked).toContain('0x1234...78');
-
-      // Should contain the full address for the link
+      // Should contain the full address as display text
       expect(linked).toContain('0x1234567890abcdef1234567890abcdef12345678');
+
+      // Should link to Polymarket profile
+      expect(linked).toContain('https://polymarket.com/profile/0x1234567890abcdef1234567890abcdef12345678');
 
       // Should contain OSC 8 escape sequences
       expect(linked).toContain('\x1b]8;;');
@@ -227,6 +229,7 @@ describe('CLIReporter', () => {
     it('defaults to linkable when not specified', () => {
       const result = reporter.truncateWallet('0x1234567890abcdef1234567890abcdef12345678');
       expect(result).toContain('\x1b]8;;'); // Has hyperlink
+      expect(result).toContain('https://polymarket.com/profile/'); // Links to profile
     });
   });
 
