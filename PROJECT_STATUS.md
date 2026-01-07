@@ -284,6 +284,8 @@ src/
 ├── commands/         (CLI commands)
 │   ├── analyze.ts    - Market analysis
 │   └── investigate.ts - Wallet investigation
+├── monitor/          (Real-time monitoring)
+│   └── types.ts      - Monitor type definitions
 ├── output/           (Formatting)
 │   ├── cli.ts        - Terminal output
 │   └── types.ts      - Output types
@@ -366,3 +368,4 @@ docs/ (Planning documents)
 | 2026-01-07 | Added `-w/--wallet` filter to analyze command: filters trades to specific wallet, shows all trades (not just alerts), skips safe bet filter |
 | 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
 | 2026-01-07 | Added `@polymarket/real-time-data-client` dependency (v1.4.0) for real-time monitoring feature |
+| 2026-01-07 | Added monitor type definitions (`src/monitor/types.ts`): RTDSTradeEvent, EvaluatedTrade, MonitorConfig, ConnectionState, MonitorOptions |
