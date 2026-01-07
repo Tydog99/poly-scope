@@ -1,18 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AccountHistorySignal } from '../../src/signals/accountHistory.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
-import type { Trade, SignalContext, AccountHistory } from '../../src/signals/types.js';
+import type { SignalContext, AccountHistory } from '../../src/signals/types.js';
+import type { AggregatedTrade } from '../../src/api/types.js';
 
-const makeTrade = (): Trade => ({
-  id: 'test-1',
-  marketId: 'market-1',
-  wallet: '0xabc',
+const makeTrade = (): AggregatedTrade => ({
+  transactionHash: '0xtx1',
+  marketId: 'market1',
+  wallet: '0xwallet',
   side: 'BUY',
   outcome: 'YES',
-  size: 10000,
-  price: 0.5,
+  totalSize: 10000,
+  totalValueUsd: 5000,
+  avgPrice: 0.5,
   timestamp: new Date('2024-01-15T12:00:00Z'),
-  valueUsd: 5000,
+  fills: [{
+    id: '0xtx1-0',
+    size: 10000,
+    price: 0.5,
+    valueUsd: 5000,
+    timestamp: Date.now() / 1000,
+  }],
+  fillCount: 1,
 });
 
 const makeContext = (history?: AccountHistory): SignalContext => ({
