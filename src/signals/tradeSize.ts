@@ -1,25 +1,26 @@
-import type { Signal, SignalResult, Trade, SignalContext, PricePoint } from './types.js';
+import type { Signal, SignalResult, SignalContext, PricePoint } from './types.js';
+import type { AggregatedTrade } from '../api/types.js';
 
 export class TradeSizeSignal implements Signal {
   name = 'tradeSize';
   weight = 40;
 
-  async calculate(trade: Trade, context: SignalContext): Promise<SignalResult> {
+  async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
     const { config, marketPrices = [] } = context;
     const { minAbsoluteUsd, minImpactPercent, impactWindowMinutes } = config.tradeSize;
 
     // Check minimum threshold
-    if (trade.valueUsd < minAbsoluteUsd) {
+    if (trade.totalValueUsd < minAbsoluteUsd) {
       return {
         name: this.name,
         score: 0,
         weight: this.weight,
-        details: { reason: 'below_threshold', valueUsd: trade.valueUsd, minAbsoluteUsd },
+        details: { reason: 'below_threshold', valueUsd: trade.totalValueUsd, minAbsoluteUsd },
       };
     }
 
     // Calculate size score (0-50 points) - scales logarithmically
-    const sizeMultiple = trade.valueUsd / minAbsoluteUsd;
+    const sizeMultiple = trade.totalValueUsd / minAbsoluteUsd;
     const sizeScore = Math.min(50, Math.log10(sizeMultiple) * 25 + 25);
 
     // Calculate impact score (0-50 points)
@@ -35,16 +36,17 @@ export class TradeSizeSignal implements Signal {
       score: Math.min(100, totalScore),
       weight: this.weight,
       details: {
-        valueUsd: trade.valueUsd,
+        valueUsd: trade.totalValueUsd,
         sizeScore: Math.round(sizeScore),
         impactPercent: impact,
         impactScore: Math.round(impactScore),
+        fillCount: trade.fillCount,
       },
     };
   }
 
   private calculateImpact(
-    trade: Trade,
+    trade: AggregatedTrade,
     prices: PricePoint[],
     windowMinutes: number
   ): number {
