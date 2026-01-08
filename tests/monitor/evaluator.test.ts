@@ -32,6 +32,39 @@ describe('MonitorEvaluator', () => {
     });
   });
 
+  describe('normalizeEvent', () => {
+    it('converts RTDSTradeEvent to AggregatedTrade with correct fields', () => {
+      const evaluator = new MonitorEvaluator({ minSize: 5000, threshold: 70 });
+      const trade = evaluator.normalizeEvent(mockTradeEvent);
+
+      // Identity fields
+      expect(trade.transactionHash).toBe(mockTradeEvent.transactionHash);
+      expect(trade.marketId).toBe(mockTradeEvent.asset);
+      expect(trade.wallet).toBe(mockTradeEvent.proxyWallet);
+
+      // Trade details
+      expect(trade.side).toBe(mockTradeEvent.side);
+      expect(trade.outcome).toBe('YES'); // outcomeIndex 0 = YES
+      expect(trade.totalSize).toBe(mockTradeEvent.size);
+      expect(trade.avgPrice).toBe(mockTradeEvent.price);
+      expect(trade.totalValueUsd).toBe(mockTradeEvent.size * mockTradeEvent.price);
+
+      // Fill details
+      expect(trade.fillCount).toBe(1);
+      expect(trade.fills).toHaveLength(1);
+      expect(trade.fills[0].id).toBe(mockTradeEvent.transactionHash);
+      expect(trade.fills[0].size).toBe(mockTradeEvent.size);
+      expect(trade.fills[0].price).toBe(mockTradeEvent.price);
+    });
+
+    it('maps outcomeIndex 1 to NO', () => {
+      const evaluator = new MonitorEvaluator({ minSize: 5000, threshold: 70 });
+      const noTrade = { ...mockTradeEvent, outcomeIndex: 1 };
+      const trade = evaluator.normalizeEvent(noTrade);
+      expect(trade.outcome).toBe('NO');
+    });
+  });
+
   describe('session cache', () => {
     it('caches account data for repeated evaluations', () => {
       const evaluator = new MonitorEvaluator({ minSize: 5000, threshold: 70 });
