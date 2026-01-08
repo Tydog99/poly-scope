@@ -179,6 +179,107 @@ describe('AccountHistorySignal', () => {
     });
   });
 
+  describe('account age calculation relative to trade timestamp', () => {
+    it('calculates account age based on trade timestamp, not current date', async () => {
+      // Set system time to 6 months after the trade
+      vi.setSystemTime(new Date('2024-07-15T12:00:00Z'));
+
+      const history: AccountHistory = {
+        wallet: '0xabc',
+        totalTrades: 5,
+        firstTradeDate: new Date('2024-01-10'), // Account created Jan 10
+        lastTradeDate: new Date('2024-01-14'),
+        totalVolumeUsd: 10000,
+      };
+
+      // Trade happened on Jan 15 (5 days after account creation)
+      const trade = {
+        ...makeTrade(),
+        timestamp: new Date('2024-01-15T12:00:00Z'),
+      };
+
+      const result = await signal.calculate(trade, makeContext(history));
+
+      // Account should be 5 days old at trade time, NOT 6+ months old
+      expect(result.details.accountAgeDays).toBe(5);
+    });
+
+    it('correctly scores historical trades from new accounts', async () => {
+      // Set system time to 1 year after the trade
+      vi.setSystemTime(new Date('2025-01-15T12:00:00Z'));
+
+      const history: AccountHistory = {
+        wallet: '0xabc',
+        totalTrades: 2,
+        firstTradeDate: new Date('2024-01-14'), // Account created 1 day before trade
+        lastTradeDate: new Date('2024-01-15'),
+        totalVolumeUsd: 50000,
+      };
+
+      const trade = {
+        ...makeTrade(),
+        timestamp: new Date('2024-01-15T12:00:00Z'),
+      };
+
+      const result = await signal.calculate(trade, makeContext(history));
+
+      // Account was only 1 day old at trade time - should be very suspicious
+      expect(result.details.accountAgeDays).toBe(1);
+      // Age score gets scaled down due to volume bonus for high-volume new accounts
+      // but should still be substantial (75% of max = ~25)
+      expect(result.details.ageScore).toBeGreaterThan(20);
+      expect(result.score).toBeGreaterThan(60); // High overall score
+    });
+
+    it('does not penalize old accounts in historical analysis', async () => {
+      // Set system time to 2 years after the trade
+      vi.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+
+      const history: AccountHistory = {
+        wallet: '0xabc',
+        totalTrades: 500,
+        firstTradeDate: new Date('2023-01-01'), // Account was already 1 year old at trade time
+        lastTradeDate: new Date('2024-01-14'),
+        totalVolumeUsd: 500000,
+      };
+
+      const trade = {
+        ...makeTrade(),
+        timestamp: new Date('2024-01-15T12:00:00Z'),
+      };
+
+      const result = await signal.calculate(trade, makeContext(history));
+
+      // Account was ~1 year old at trade time - established account
+      expect(result.details.accountAgeDays).toBeGreaterThan(365);
+      expect(result.details.ageScore).toBe(0); // No age penalty for old account
+      expect(result.score).toBeLessThan(20); // Low overall score
+    });
+
+    it('handles edge case where trade timestamp equals account creation', async () => {
+      vi.setSystemTime(new Date('2024-06-01T12:00:00Z'));
+
+      const history: AccountHistory = {
+        wallet: '0xabc',
+        totalTrades: 1,
+        firstTradeDate: new Date('2024-01-15T12:00:00Z'),
+        lastTradeDate: new Date('2024-01-15T12:00:00Z'),
+        totalVolumeUsd: 10000,
+      };
+
+      const trade = {
+        ...makeTrade(),
+        timestamp: new Date('2024-01-15T12:00:00Z'), // Same as account creation
+      };
+
+      const result = await signal.calculate(trade, makeContext(history));
+
+      // Account is 0 days old at trade time - maximum suspicion for age
+      expect(result.details.accountAgeDays).toBe(0);
+      expect(result.details.ageScore).toBe(33); // Max age score
+    });
+  });
+
   describe('with subgraph data', () => {
     it('uses creationDate when available instead of firstTradeDate', async () => {
       const history: AccountHistory = {

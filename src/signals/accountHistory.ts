@@ -30,12 +30,12 @@ export class AccountHistorySignal implements Signal {
       };
     }
 
-    const now = new Date();
-
     // Use creationDate from subgraph if available, otherwise fall back to firstTradeDate
     const accountCreationDate = accountHistory.creationDate || accountHistory.firstTradeDate;
+    // Calculate account age relative to the trade timestamp, not current date
+    // This ensures historical analysis correctly measures how old the account was at trade time
     const accountAgeDays = Math.floor(
-      (now.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
+      (trade.timestamp.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     const dormancyDays = accountHistory.lastTradeDate

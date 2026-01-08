@@ -1,13 +1,13 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-07
+Last updated: 2026-01-08
 
 ## 1. Current Implementation - Fully Functional
 
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 201 tests passing across 18 test files
+- **Test Status**: All 221 tests passing across 21 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (3)
@@ -196,6 +196,19 @@ The subgraph client has advanced methods that aren't integrated into the main co
 - Market field sometimes undefined in trade responses
 - Asset IDs are decimal (not hex condition IDs)
 - Query complexity limits apply
+
+### Point-in-Time Analysis Bug (Partially Fixed)
+
+Historical analysis uses **current** account state instead of state **at the time of the analyzed trade**. This can cause insider trades to be missed when analyzing old markets.
+
+| Signal | Field | Status | Impact |
+|--------|-------|--------|--------|
+| AccountHistorySignal | `accountAgeDays` | **Fixed** | Was using `new Date()` instead of trade timestamp |
+| AccountHistorySignal | `totalTrades` | Bug | First-trade insiders now appear "established" |
+| AccountHistorySignal | `profitUsd` | Bug | Early profits diluted by later losses |
+| ConvictionSignal | `totalVolumeUsd` | Bug | High-conviction bets appear diversified |
+
+See `docs/POINT_IN_TIME_BUG.md` for detailed analysis and proposed fixes.
 
 ### Technical Considerations
 
@@ -405,3 +418,6 @@ docs/ (Planning documents)
 | 2026-01-08 | Fixed weight display bug: removed erroneous `* 100` multiplication (was showing 4000% instead of 40%) |
 | 2026-01-08 | Fixed signal score formatting: removed `/100` suffixes, added proper column padding for table alignment |
 | 2026-01-08 | Fixed outcome detection: added `outcomeIndex` to ResolvedToken, now uses index-based mapping instead of string matching (fixes non-binary markets like "Up"/"Down") |
+| 2026-01-08 | Fixed account age calculation bug: now uses trade timestamp instead of current date for historical analysis |
+| 2026-01-08 | Added 4 tests for point-in-time account age calculation |
+| 2026-01-08 | Documented remaining point-in-time bugs in `docs/POINT_IN_TIME_BUG.md`: trade count, profit, and conviction concentration still use current state |
