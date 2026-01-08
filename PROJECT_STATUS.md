@@ -7,7 +7,7 @@ Last updated: 2026-01-07
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 200 tests passing across 18 test files
+- **Test Status**: All 201 tests passing across 18 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (2)
@@ -384,3 +384,6 @@ docs/ (Planning documents)
 | 2026-01-07 | Updated all test fixtures to use AggregatedTrade shape: trades.test.ts, cli.test.ts, integration/analyze.test.ts |
 | 2026-01-07 | Updated integration test to use lower alertThreshold (60) to match candidate threshold calculation |
 | 2026-01-07 | **Aggregate Trades Implementation Complete**: All 15 tasks done, 200 tests pass, signals now score transactions instead of individual fills |
+| 2026-01-08 | Fixed weight display bug: removed erroneous `* 100` multiplication (was showing 4000% instead of 40%) |
+| 2026-01-08 | Fixed signal score formatting: removed `/100` suffixes, added proper column padding for table alignment |
+| 2026-01-08 | Fixed outcome detection: added `outcomeIndex` to ResolvedToken, now uses index-based mapping instead of string matching (fixes non-binary markets like "Up"/"Down") |

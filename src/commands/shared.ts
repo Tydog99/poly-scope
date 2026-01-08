@@ -21,14 +21,17 @@ export function buildTokenToOutcome(market: Market): Map<string, 'YES' | 'NO'> {
 }
 
 /**
- * Build a tokenId -> outcome mapping from resolved tokens
+ * Build a tokenId -> outcome mapping from resolved tokens.
+ * Uses outcomeIndex (0 = YES, 1 = NO) for reliable mapping on all market types,
+ * not string matching which fails on non-binary markets like "Up"/"Down".
  */
 export function buildTokenToOutcomeFromResolved(
   resolvedTokens: Map<string, ResolvedToken>
 ): Map<string, 'YES' | 'NO'> {
   const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
   for (const [tokenId, resolved] of resolvedTokens) {
-    const outcome = resolved.outcome === 'Yes' ? 'YES' : resolved.outcome === 'No' ? 'NO' : 'YES';
+    // Index 0 = first outcome (YES side), Index 1 = second outcome (NO side)
+    const outcome = resolved.outcomeIndex === 0 ? 'YES' : 'NO';
     tokenToOutcome.set(tokenId.toLowerCase(), outcome);
   }
   return tokenToOutcome;

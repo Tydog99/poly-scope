@@ -286,12 +286,12 @@ describe('CLIReporter', () => {
       const report = createMockAnalysisReport();
       const output = reporter.formatAnalysisReport(report);
 
-      // Should show the total score
-      expect(output).toContain('85/100');
+      // Should show the total score (without /100 suffix)
+      expect(output).toMatch(/\b85\b/);
 
       // Should show individual signal scores
-      expect(output).toContain('90/100'); // tradeSize
-      expect(output).toContain('80/100'); // accountHistory
+      expect(output).toMatch(/\b90\b/); // tradeSize
+      expect(output).toMatch(/\b80\b/); // accountHistory
     });
 
     it('formats trade value and outcome', () => {
@@ -464,8 +464,8 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatAnalysisReport(report);
 
-        // The output contains ANSI color codes - we just verify the score is present
-        expect(output).toContain('85/100');
+        // The output contains ANSI color codes - we just verify the score is present (without /100 suffix)
+        expect(output).toMatch(/\b85\b/);
       });
 
       it('applies yellow color for scores >= 60 and < 80', () => {
@@ -478,7 +478,7 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatAnalysisReport(report);
 
-        expect(output).toContain('70/100');
+        expect(output).toMatch(/\b70\b/);
       });
     });
   });
