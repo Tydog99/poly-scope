@@ -9,6 +9,7 @@ import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
 import { getMarketResolver } from '../api/market-resolver.js';
 import { aggregateFills } from '../api/aggregator.js';
+import type { Market, SubgraphTrade } from '../api/types.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -129,14 +130,39 @@ export class AnalyzeCommand {
 
       console.log(`Aggregated to ${allTrades.length} non-complementary transactions`);
     } else {
-      // NORMAL MODE: Fetch all market trades (uses cache)
-      allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
-        market,
-        after: options.after,
-        before: options.before,
-        maxTrades: options.maxTrades,
-        role,
-      });
+      // NORMAL MODE: Fetch raw fills from subgraph, then aggregate per wallet
+      const hasTokens = market.tokens && market.tokens.length > 0;
+
+      if (this.subgraphClient && hasTokens) {
+        // Build token ID to outcome mapping for aggregation
+        const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
+        for (const token of market.tokens) {
+          tokenToOutcome.set(token.tokenId.toLowerCase(), token.outcome.toUpperCase() as 'YES' | 'NO');
+        }
+
+        // Get raw fills (not pre-aggregated) for aggregation
+        const rawFills = await this.fetchRawFills(market, options);
+
+        if (rawFills.length > 0) {
+          // Aggregate fills per wallet to handle:
+          // 1. Multiple fills in same tx -> one aggregated trade
+          // 2. Maker/taker double-counting -> pick higher value role
+          // 3. Complementary trades (YES+NO in same tx) -> filter smaller side
+          allTrades = this.aggregateAllWalletTrades(rawFills, tokenToOutcome);
+          console.log(`Aggregated ${rawFills.length} fills to ${allTrades.length} trades`);
+        } else {
+          allTrades = [];
+        }
+      } else {
+        // Fallback to Data API or no subgraph (already converted to Trade format)
+        allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
+          market,
+          after: options.after,
+          before: options.before,
+          maxTrades: options.maxTrades,
+          role,
+        });
+      }
     }
 
     // 3. Filter trades
@@ -312,5 +338,70 @@ export class AnalyzeCommand {
       targetWallet: options.wallet,
       targetAccountHistory: options.wallet ? targetAccountHistory : undefined,
     };
+  }
+
+  /**
+   * Fetch raw fills from subgraph for aggregation
+   */
+  private async fetchRawFills(
+    market: Market,
+    options: AnalyzeOptions
+  ): Promise<SubgraphTrade[]> {
+    if (!this.subgraphClient) return [];
+
+    const totalLimit = options.maxTrades ?? 10000;
+    const perTokenLimit = Math.ceil(totalLimit / market.tokens.length);
+
+    const allFills: SubgraphTrade[] = [];
+    for (const token of market.tokens) {
+      console.log(`Fetching fills for ${token.outcome} token (${token.tokenId.slice(0, 10)}...)...`);
+      const fills = await this.subgraphClient.getTradesByMarket(token.tokenId, {
+        limit: perTokenLimit,
+        after: options.after,
+        before: options.before,
+        orderDirection: 'desc',
+      });
+      allFills.push(...fills);
+    }
+
+    // Sort by timestamp descending
+    allFills.sort((a, b) => b.timestamp - a.timestamp);
+    return allFills.slice(0, totalLimit);
+  }
+
+  /**
+   * Aggregate fills per wallet using the same logic as aggregateFills().
+   * Groups fills by wallet, then aggregates each wallet's fills.
+   */
+  private aggregateAllWalletTrades(
+    fills: SubgraphTrade[],
+    tokenToOutcome: Map<string, 'YES' | 'NO'>
+  ): Trade[] {
+    // Group fills by wallet (using taker as the wallet - taker analysis)
+    const fillsByWallet = new Map<string, SubgraphTrade[]>();
+    for (const fill of fills) {
+      // Use taker as the wallet for insider detection (takers show urgency)
+      const wallet = fill.taker?.toLowerCase();
+      if (!wallet) continue;
+
+      if (!fillsByWallet.has(wallet)) {
+        fillsByWallet.set(wallet, []);
+      }
+      fillsByWallet.get(wallet)!.push(fill);
+    }
+
+    // Aggregate each wallet's fills
+    const allTrades: Trade[] = [];
+    for (const [wallet, walletFills] of fillsByWallet) {
+      const aggregated = aggregateFills(walletFills, {
+        wallet,
+        tokenToOutcome,
+      });
+      allTrades.push(...aggregated);
+    }
+
+    // Sort by timestamp descending
+    allTrades.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return allTrades;
   }
 }
