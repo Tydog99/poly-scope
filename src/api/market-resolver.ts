@@ -34,6 +34,7 @@ export interface ResolvedToken {
   tokenId: string;
   question: string;
   outcome: string;
+  outcomeIndex: number;  // 0 = first outcome (YES), 1 = second outcome (NO)
   marketSlug: string;
   conditionId: string;
 }
@@ -112,6 +113,7 @@ export class MarketResolver {
                 tokenId,
                 question: market.question,
                 outcome,
+                outcomeIndex: i,
                 marketSlug: market.slug,
                 conditionId: market.conditionId,
               };

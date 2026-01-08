@@ -16,7 +16,7 @@ export class TradeClassifier {
         } = this.config.classification;
 
         // WHALE: Large absolute size
-        if (trade.trade.valueUsd >= whaleThreshold) {
+        if (trade.trade.totalValueUsd >= whaleThreshold) {
             classifications.push('WHALE');
         }
 
@@ -27,7 +27,7 @@ export class TradeClassifier {
         if (
             trade.score.total >= sniperScoreMin &&
             Math.abs(impact) >= sniperImpactMin &&
-            trade.trade.valueUsd < whaleThreshold // Whales aren't usually called snipers
+            trade.trade.totalValueUsd < whaleThreshold // Whales aren't usually called snipers
         ) {
             classifications.push('SNIPER');
         }

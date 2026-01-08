@@ -64,12 +64,12 @@ export class CLIReporter {
     // Table header
     const header = [
       chalk.bold('#'.padStart(3)),
-      chalk.bold('Score'),
-      chalk.bold('Size'),
-      chalk.bold('Acct'),
-      chalk.bold('Conv'),
+      chalk.bold('Score'.padStart(6)),
+      chalk.bold('Size'.padStart(4)),
+      chalk.bold('Acct'.padStart(4)),
+      chalk.bold('Conv'.padStart(4)),
       chalk.bold('Time'.padEnd(15)),
-      chalk.bold('Wallet'),
+      chalk.bold('Wallet'.padEnd(42)),
       chalk.bold('Trade'),
       chalk.bold('Tags'),
     ].join('  ');
@@ -182,8 +182,8 @@ export class CLIReporter {
         `  ${String(idx + 1).padEnd(4)}` +
         `${this.formatTime(st.trade.timestamp).padEnd(18)}` +
         `${sideColor(sideStr.padEnd(10))}` +
-        `${this.formatUsd(st.trade.valueUsd).padStart(10)}  ` +
-        `${st.trade.price.toFixed(2).padStart(6)}  ` +
+        `${this.formatUsd(st.trade.totalValueUsd).padStart(10)}  ` +
+        `${st.trade.avgPrice.toFixed(2).padStart(6)}  ` +
         `${scoreColor(String(st.score.total).padStart(3))}  ` +
         chalk.gray(`Sz:${String(sizeScore).padStart(2)} Ac:${String(acctScore).padStart(2)} Cv:${String(convScore).padStart(2)}`)
       );
@@ -211,13 +211,13 @@ export class CLIReporter {
     const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
 
     // Trade header
-    lines.push(chalk.bold(`Trade #${rank}: ${st.trade.side} ${st.trade.outcome} ${this.formatUsd(st.trade.valueUsd)} @ ${st.trade.price.toFixed(2)} (${this.formatTime(st.trade.timestamp)})`));
+    lines.push(chalk.bold(`Trade #${rank}: ${st.trade.side} ${st.trade.outcome} ${this.formatUsd(st.trade.totalValueUsd)} @ ${st.trade.avgPrice.toFixed(2)} (${this.formatTime(st.trade.timestamp)})`));
     lines.push(chalk.gray('─'.repeat(60)));
 
     // Signal breakdowns
     for (const signal of st.score.signals) {
       const details = signal.details as Record<string, unknown>;
-      const weightPct = Math.round(signal.weight * 100);
+      const weightPct = signal.weight;
 
       lines.push(`  ${chalk.bold(this.getSignalFullName(signal.name))} (${weightPct}% weight)${' '.repeat(10)}Score: ${signal.score}`);
 
@@ -297,11 +297,11 @@ export class CLIReporter {
       const existing = stats.get(wallet);
       if (existing) {
         existing.count++;
-        existing.totalVolume += st.trade.valueUsd;
+        existing.totalVolume += st.trade.totalValueUsd;
       } else {
         stats.set(wallet, {
           count: 1,
-          totalVolume: st.trade.valueUsd,
+          totalVolume: st.trade.totalValueUsd,
           color: chalk.cyan, // Default for single appearance
         });
       }
@@ -351,13 +351,13 @@ export class CLIReporter {
 
     const cols = [
       String(rank).padStart(3),
-      scoreColor(String(st.score.total).padStart(3) + '/100'),
-      String(sizeScore).padStart(3) + '/100',
-      String(acctScore).padStart(3) + '/100',
-      String(convScore).padStart(3) + '/100',
+      scoreColor(String(st.score.total).padStart(6)),
+      String(sizeScore).padStart(4),
+      String(acctScore).padStart(4),
+      String(convScore).padStart(4),
       chalk.gray(this.formatTime(st.trade.timestamp)),
       walletColor(this.formatWalletLink(st.trade.wallet)),
-      `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
+      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
       tags,
     ];
 
@@ -377,11 +377,11 @@ export class CLIReporter {
     const lines: string[] = [];
     const scoreColor = st.score.total >= 80 ? chalk.red : st.score.total >= 60 ? chalk.yellow : chalk.white;
 
-    lines.push(`#${rank}  Score: ${scoreColor.bold(`${st.score.total}/100`)}`);
+    lines.push(`#${rank}  Score: ${scoreColor.bold(st.score.total)}`);
 
     // Score breakdown by signal
     const breakdown = st.score.signals
-      .map((s) => `${this.getSignalAbbrev(s.name)}:${s.score}/100`)
+      .map((s) => `${this.getSignalAbbrev(s.name)}:${s.score}`)
       .join(' | ');
     lines.push(`    ${chalk.gray(breakdown)}`);
 
@@ -398,7 +398,7 @@ export class CLIReporter {
     }
 
     lines.push(`    Wallet: ${chalk.cyan(this.formatWalletLink(st.trade.wallet))}`);
-    lines.push(`    Trade: ${this.formatUsd(st.trade.valueUsd)} ${st.trade.outcome} @ ${st.trade.price.toFixed(2)}`);
+    lines.push(`    Trade: ${this.formatUsd(st.trade.totalValueUsd)} ${st.trade.outcome} @ ${st.trade.avgPrice.toFixed(2)}`);
 
 
     if (st.priceImpact) {
@@ -1093,6 +1093,9 @@ export class CLIReporter {
         for (let i = 0; i < Math.min(report.suspiciousTrades.length, MAX_SUSPICIOUS_TRADES_DISPLAY); i++) {
           const st = report.suspiciousTrades[i];
           lines.push(this.formatSuspiciousTradeForWallet(st, i + 1, report.resolvedMarkets));
+          if (this.options.debug) {
+            lines.push(this.formatDebugDetails(st));
+          }
         }
 
         if (report.suspiciousTrades.length > MAX_SUSPICIOUS_TRADES_DISPLAY) {
@@ -1141,13 +1144,13 @@ export class CLIReporter {
 
     const cols = [
       String(rank).padStart(3),
-      scoreColor(String(st.score.total).padStart(3) + '/100'),
-      String(sizeScore).padStart(3) + '/100',
-      String(acctScore).padStart(3) + '/100',
-      String(convScore).padStart(3) + '/100',
+      scoreColor(String(st.score.total).padStart(6)),
+      String(sizeScore).padStart(4),
+      String(acctScore).padStart(4),
+      String(convScore).padStart(4),
       chalk.gray(timeStr),
       marketDisplay.padEnd(36),
-      `${this.formatUsd(st.trade.valueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.price.toFixed(2)}`,
+      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
     ];
 
     return '  ' + cols.join('  ');

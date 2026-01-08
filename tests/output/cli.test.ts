@@ -11,16 +11,29 @@ import type { Trade, AccountHistory, SignalResult } from '../../src/signals/type
 // =============================================================================
 
 function createMockTrade(overrides: Partial<Trade> = {}): Trade {
+  const timestamp = overrides.timestamp ?? new Date('2024-01-15T10:30:00Z');
+  const totalSize = overrides.totalSize ?? 50000;
+  const avgPrice = overrides.avgPrice ?? 0.12;
+  const totalValueUsd = overrides.totalValueUsd ?? 6000;
+
   return {
-    id: 't-1',
+    transactionHash: 't-1',
     marketId: 'test-123',
     wallet: '0x1234567890abcdef1234567890abcdef12345678',
     side: 'BUY',
     outcome: 'YES',
-    size: 50000,
-    price: 0.12,
-    timestamp: new Date('2024-01-15T10:30:00Z'),
-    valueUsd: 6000,
+    totalSize,
+    avgPrice,
+    timestamp,
+    totalValueUsd,
+    fills: [{
+      id: 't-1',
+      size: totalSize,
+      price: avgPrice,
+      valueUsd: totalValueUsd,
+      timestamp: Math.floor(timestamp.getTime() / 1000),
+    }],
+    fillCount: 1,
     ...overrides,
   };
 }
@@ -273,19 +286,19 @@ describe('CLIReporter', () => {
       const report = createMockAnalysisReport();
       const output = reporter.formatAnalysisReport(report);
 
-      // Should show the total score
-      expect(output).toContain('85/100');
+      // Should show the total score (without /100 suffix)
+      expect(output).toMatch(/\b85\b/);
 
       // Should show individual signal scores
-      expect(output).toContain('90/100'); // tradeSize
-      expect(output).toContain('80/100'); // accountHistory
+      expect(output).toMatch(/\b90\b/); // tradeSize
+      expect(output).toMatch(/\b80\b/); // accountHistory
     });
 
     it('formats trade value and outcome', () => {
       const report = createMockAnalysisReport({
         suspiciousTrades: [
           createMockSuspiciousTrade({
-            trade: createMockTrade({ valueUsd: 12500, outcome: 'YES', price: 0.25 }),
+            trade: createMockTrade({ totalValueUsd: 12500, outcome: 'YES', avgPrice: 0.25 }),
           }),
         ],
       });
@@ -303,9 +316,9 @@ describe('CLIReporter', () => {
 
         const report = createMockAnalysisReport({
           suspiciousTrades: [
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 5000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 3000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 5000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 3000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 1000 }) }),
           ],
         });
         const output = reporter.formatAnalysisReport(report);
@@ -335,10 +348,10 @@ describe('CLIReporter', () => {
         const report = createMockAnalysisReport({
           suspiciousTrades: [
             // wallet2 has higher total volume
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 10000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, valueUsd: 10000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 1000 }) }),
-            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, valueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 10000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet2, totalValueUsd: 10000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 1000 }) }),
+            createMockSuspiciousTrade({ trade: createMockTrade({ wallet: wallet1, totalValueUsd: 1000 }) }),
           ],
         });
         const output = reporter.formatAnalysisReport(report);
@@ -451,8 +464,8 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatAnalysisReport(report);
 
-        // The output contains ANSI color codes - we just verify the score is present
-        expect(output).toContain('85/100');
+        // The output contains ANSI color codes - we just verify the score is present (without /100 suffix)
+        expect(output).toMatch(/\b85\b/);
       });
 
       it('applies yellow color for scores >= 60 and < 80', () => {
@@ -465,7 +478,7 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatAnalysisReport(report);
 
-        expect(output).toContain('70/100');
+        expect(output).toMatch(/\b70\b/);
       });
     });
   });

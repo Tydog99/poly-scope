@@ -55,9 +55,9 @@ export class TradeCache {
     const existing = this.load(marketId);
     const existingTrades = existing?.trades ?? [];
 
-    // Deduplicate by trade ID
-    const existingIds = new Set(existingTrades.map(t => t.id));
-    const uniqueNewTrades = newTrades.filter(t => !existingIds.has(t.id));
+    // Deduplicate by transaction hash
+    const existingIds = new Set(existingTrades.map(t => t.transactionHash));
+    const uniqueNewTrades = newTrades.filter(t => !existingIds.has(t.transactionHash));
 
     const allTrades = [...uniqueNewTrades, ...existingTrades];
 

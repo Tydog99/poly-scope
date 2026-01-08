@@ -102,16 +102,25 @@ export class MonitorEvaluator {
    * Convert RTDSTradeEvent to the Trade type used by signals.
    */
   normalizeEvent(event: RTDSTradeEvent): Trade {
+    const valueUsd = event.size * event.price;
     return {
-      id: event.transactionHash,
+      transactionHash: event.transactionHash,
       marketId: event.asset,
       wallet: event.proxyWallet,
       side: event.side,
       outcome: event.outcomeIndex === 0 ? 'YES' : 'NO',
-      size: event.size,
-      price: event.price,
+      totalSize: event.size,
+      avgPrice: event.price,
       timestamp: new Date(event.timestamp * 1000),
-      valueUsd: event.size * event.price,
+      totalValueUsd: valueUsd,
+      fills: [{
+        id: event.transactionHash,
+        size: event.size,
+        price: event.price,
+        valueUsd: valueUsd,
+        timestamp: event.timestamp,
+      }],
+      fillCount: 1,
     };
   }
 

@@ -8,24 +8,28 @@
   },
   "trades": [
     {
-      "id": "insider-trade-1",
+      "transactionHash": "insider-trade-1",
       "wallet": "0xsuspicious1",
       "side": "BUY",
       "outcome": "YES",
-      "size": 1000000,
-      "price": 0.12,
+      "totalSize": 1000000,
+      "avgPrice": 0.12,
       "timestamp": "2026-01-01T10:00:00Z",
-      "valueUsd": 100000
+      "totalValueUsd": 100000,
+      "fills": [{"id": "insider-trade-1", "size": 1000000, "price": 0.12, "valueUsd": 100000, "timestamp": 1735725600}],
+      "fillCount": 1
     },
     {
-      "id": "normal-trade-1",
+      "transactionHash": "normal-trade-1",
       "wallet": "0xnormal1",
       "side": "BUY",
       "outcome": "YES",
-      "size": 500,
-      "price": 0.15,
+      "totalSize": 500,
+      "avgPrice": 0.15,
       "timestamp": "2026-01-01T11:00:00Z",
-      "valueUsd": 75
+      "totalValueUsd": 75,
+      "fills": [{"id": "normal-trade-1", "size": 500, "price": 0.15, "valueUsd": 75, "timestamp": 1735729200}],
+      "fillCount": 1
     }
   ],
   "accounts": {

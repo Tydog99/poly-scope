@@ -57,8 +57,8 @@ describe('TradeFetcher', () => {
     const trades = await fetcher.getTradesForMarket('market-1');
 
     expect(trades).toHaveLength(1);
-    expect(trades[0].id).toBe('0xtx1');
-    expect(trades[0].valueUsd).toBe(500);
+    expect(trades[0].transactionHash).toBe('0xtx1');
+    expect(trades[0].totalValueUsd).toBe(500);
   });
 
   it('filters trades by outcome', async () => {
@@ -85,7 +85,7 @@ describe('TradeFetcher', () => {
     });
 
     expect(trades).toHaveLength(1);
-    expect(trades[0].id).toBe('0xyes');
+    expect(trades[0].transactionHash).toBe('0xyes');
   });
 
   it('converts raw trade to Trade interface', async () => {
@@ -99,8 +99,8 @@ describe('TradeFetcher', () => {
     const trade = trades[0];
 
     expect(trade.side).toBe('BUY');
-    expect(trade.price).toBe(0.5);
-    expect(trade.size).toBe(1000);
+    expect(trade.avgPrice).toBe(0.5);
+    expect(trade.totalSize).toBe(1000);
     expect(trade.wallet).toBe('0xtaker');
     expect(trade.outcome).toBe('YES');
     expect(trade.timestamp).toBeInstanceOf(Date);
@@ -109,15 +109,17 @@ describe('TradeFetcher', () => {
 
   it('uses cached trades when available', async () => {
     const cachedTrade = {
-      id: '0xcached',
+      transactionHash: '0xcached',
       marketId: 'market-1',
       wallet: '0xwallet',
       side: 'BUY' as const,
       outcome: 'YES' as const,
-      size: 100,
-      price: 0.5,
+      totalSize: 100,
+      avgPrice: 0.5,
       timestamp: new Date(TRADE_TIMESTAMP * 1000),
-      valueUsd: 50,
+      totalValueUsd: 50,
+      fills: [{ id: '0xcached', size: 100, price: 0.5, valueUsd: 50, timestamp: TRADE_TIMESTAMP }],
+      fillCount: 1,
     };
 
     const mockCache = createMockCache();
@@ -139,7 +141,7 @@ describe('TradeFetcher', () => {
     const trades = await fetcher.getTradesForMarket('market-1', { maxTrades: 1 });
 
     expect(trades).toHaveLength(1);
-    expect(trades[0].id).toBe('0xcached');
+    expect(trades[0].transactionHash).toBe('0xcached');
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -191,18 +193,19 @@ describe('TradeFetcher', () => {
 
       expect(mockSubgraphClient.getTradesByMarket).toHaveBeenCalledTimes(2); // YES and NO tokens
       expect(trades).toHaveLength(1);
-      expect(trades[0].id).toBe('0xsubgraph_tx');
+      expect(trades[0].transactionHash).toBe('0xsubgraph_tx');
       expect(trades[0].wallet).toBe('0xtaker');
       expect(trades[0].outcome).toBe('YES');
       // Taker's action is OPPOSITE of maker's side.
       // Maker side = 'Buy' means taker is SELLING to fill the maker's buy order.
       expect(trades[0].side).toBe('SELL');
-      expect(trades[0].size).toBe(1000); // 500 USD / 0.5 price = 1000 shares
-      expect(trades[0].price).toBe(0.5);
-      expect(trades[0].valueUsd).toBe(500); // 500 USD
-      expect(trades[0].role).toBe('taker'); // Default role filter is 'taker'
-      expect(trades[0].maker).toBe('0xmaker');
-      expect(trades[0].taker).toBe('0xtaker');
+      expect(trades[0].totalSize).toBe(1000); // 500 USD / 0.5 price = 1000 shares
+      expect(trades[0].avgPrice).toBe(0.5);
+      expect(trades[0].totalValueUsd).toBe(500); // 500 USD
+      // Check fills for role information
+      expect(trades[0].fills[0].role).toBe('taker'); // Default role filter is 'taker'
+      expect(trades[0].fills[0].maker).toBe('0xmaker');
+      expect(trades[0].fills[0].taker).toBe('0xtaker');
     });
 
     it('falls back to Data API when subgraph fails', async () => {
@@ -227,7 +230,7 @@ describe('TradeFetcher', () => {
       });
 
       expect(trades).toHaveLength(1);
-      expect(trades[0].id).toBe('0xtx1'); // From Data API
+      expect(trades[0].transactionHash).toBe('0xtx1'); // From Data API
     });
 
     it('falls back to Data API when no token IDs provided', async () => {
@@ -252,7 +255,7 @@ describe('TradeFetcher', () => {
 
       expect(mockSubgraphClient.getTradesByMarket).not.toHaveBeenCalled();
       expect(trades).toHaveLength(1);
-      expect(trades[0].id).toBe('0xtx1'); // From Data API
+      expect(trades[0].transactionHash).toBe('0xtx1'); // From Data API
     });
 
     it('uses cached timestamp for incremental query', async () => {
@@ -268,7 +271,7 @@ describe('TradeFetcher', () => {
         marketId: '0xcondition1',
         newestTimestamp: TRADE_TIMESTAMP,
         oldestTimestamp: TRADE_TIMESTAMP - 1000,
-        trades: [{ id: 'old_trade', timestamp: cachedDate } as any],
+        trades: [{ transactionHash: 'old_trade', timestamp: cachedDate } as any],
       });
 
       const fetcher = new TradeFetcher({
@@ -296,10 +299,10 @@ describe('TradeFetcher', () => {
 
       const mockCache = createMockCache();
       const cachedTrades = [{
-        id: 'old_trade',
+        transactionHash: 'old_trade',
         timestamp: new Date(TRADE_TIMESTAMP * 1000),
         wallet: '0xold',
-        valueUsd: 100
+        totalValueUsd: 100
       } as any];
 
       (mockCache.load as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -319,7 +322,7 @@ describe('TradeFetcher', () => {
       });
 
       expect(trades).toHaveLength(1);
-      expect(trades[0].id).toBe('old_trade');
+      expect(trades[0].transactionHash).toBe('old_trade');
     });
   });
 
@@ -332,16 +335,18 @@ describe('TradeFetcher', () => {
     const JAN_4 = new Date('2026-01-04T12:00:00Z');
     const JAN_5 = new Date('2026-01-05T12:00:00Z');
 
-    const makeTrade = (id: string, timestamp: Date) => ({
-      id,
+    const makeTrade = (transactionHash: string, timestamp: Date) => ({
+      transactionHash,
       marketId: 'market-1',
       wallet: '0xwallet',
       side: 'BUY' as const,
       outcome: 'YES' as const,
-      size: 100,
-      price: 0.5,
+      totalSize: 100,
+      avgPrice: 0.5,
       timestamp,
-      valueUsd: 50,
+      totalValueUsd: 50,
+      fills: [{ id: transactionHash, size: 100, price: 0.5, valueUsd: 50, timestamp: Math.floor(timestamp.getTime() / 1000) }],
+      fillCount: 1,
     });
 
     const cachedTrades = [
@@ -369,7 +374,7 @@ describe('TradeFetcher', () => {
       });
 
       // Should include Jan 3 morning, Jan 3 evening, Jan 4, Jan 5
-      expect(trades.map(t => t.id)).toEqual(['jan3-am', 'jan3-pm', 'jan4', 'jan5']);
+      expect(trades.map(t => t.transactionHash)).toEqual(['jan3-am', 'jan3-pm', 'jan4', 'jan5']);
     });
 
     it('filters trades before a given date', async () => {
@@ -388,7 +393,7 @@ describe('TradeFetcher', () => {
       });
 
       // Should include Jan 1, Jan 2 only (Jan 3 trades are AFTER midnight)
-      expect(trades.map(t => t.id)).toEqual(['jan1', 'jan2']);
+      expect(trades.map(t => t.transactionHash)).toEqual(['jan1', 'jan2']);
     });
 
     it('filters trades with before set to end of day', async () => {
@@ -409,7 +414,7 @@ describe('TradeFetcher', () => {
       });
 
       // Should include Jan 1, Jan 2, Jan 3 morning, Jan 3 evening
-      expect(trades.map(t => t.id)).toEqual(['jan1', 'jan2', 'jan3-am', 'jan3-pm']);
+      expect(trades.map(t => t.transactionHash)).toEqual(['jan1', 'jan2', 'jan3-am', 'jan3-pm']);
     });
 
     it('filters trades within a date range', async () => {
@@ -429,7 +434,7 @@ describe('TradeFetcher', () => {
       });
 
       // Should include Jan 2, Jan 3 morning, Jan 3 evening
-      expect(trades.map(t => t.id)).toEqual(['jan2', 'jan3-am', 'jan3-pm']);
+      expect(trades.map(t => t.transactionHash)).toEqual(['jan2', 'jan3-am', 'jan3-pm']);
     });
 
     it('returns empty array when no trades match date range', async () => {

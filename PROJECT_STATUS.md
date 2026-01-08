@@ -7,7 +7,7 @@ Last updated: 2026-01-07
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 200 tests passing across 20 test files
+- **Test Status**: All 201 tests passing across 18 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (3)
@@ -382,3 +382,26 @@ docs/ (Planning documents)
 | 2026-01-07 | Added trade evaluator (`src/monitor/evaluator.ts`): MonitorEvaluator class with session cache (5-min TTL), reuses existing signals (TradeSizeSignal, AccountHistorySignal, ConvictionSignal), normalizes RTDSTradeEvent to Trade type |
 | 2026-01-07 | Added monitor output formatters (`src/output/cli.ts`): `formatMonitorTrade()` for verbose trade lines, `formatMonitorAlert()` for full alert with signal breakdown, `formatMonitorBanner()` for startup display. YES=blue, NO=yellow colors. |
 | 2026-01-07 | Added monitor command (`src/commands/monitor.ts`): `executeMonitor()` ties together MonitorStream, MonitorEvaluator, AccountFetcher. Supports -m markets, --min-size, --threshold, --verbose flags. Graceful shutdown on SIGINT. Resolves slugs via SlugResolver before subscribing. |
+| 2026-01-07 | Added `TradeFill` and `AggregatedTrade` types for transaction-level trade aggregation |
+| 2026-01-07 | Added `aggregateFills` function in `src/api/aggregator.ts` with basic grouping by transaction hash |
+| 2026-01-07 | Added weighted average price test for aggregateFills in `tests/api/aggregator.test.ts` |
+| 2026-01-07 | Added complementary trade detection to aggregator: filters smaller USD value side when tx has both YES/NO, uses position data to override when wallet has directional position |
+| 2026-01-07 | Added edge case tests for aggregator: single-fill transactions, empty input, multiple separate transactions, maker vs taker role determination, side inversion for takers |
+| 2026-01-07 | Updated Signal interface to use AggregatedTrade type with new field names (totalValueUsd, totalSize, avgPrice); typecheck fails until signals are updated (Tasks 7-9) |
+| 2026-01-07 | Updated TradeSizeSignal to use AggregatedTrade: valueUsd -> totalValueUsd, added fillCount to details |
+| 2026-01-07 | Updated AccountHistorySignal to use AggregatedTrade type (Task 9); 23 tests pass |
+| 2026-01-07 | Updated ConvictionSignal to use AggregatedTrade: valueUsd -> totalValueUsd, simplified scoring with concentration-based thresholds |
+| 2026-01-07 | Updated output types (SuspiciousTrade, AnalysisReport) to use AggregatedTrade instead of Trade type |
+| 2026-01-07 | Updated CLI output to use AggregatedTrade fields: valueUsd -> totalValueUsd, price -> avgPrice |
+| 2026-01-07 | Refactored analyze command to use `aggregateFills()` in wallet mode: replaced ~80 lines of inline aggregation with centralized function call |
+| 2026-01-07 | Updated TradeClassifier to use AggregatedTrade fields: valueUsd -> totalValueUsd |
+| 2026-01-07 | Updated analyze tests to use new field names: id -> transactionHash, price -> avgPrice, valueUsd -> totalValueUsd, size -> totalSize |
+| 2026-01-07 | Refactored investigate command to use `aggregateFills()`: removed `convertToTrade` method, now aggregates wallet trades by transaction and filters complementary trades |
+| 2026-01-07 | Fixed type errors in cache.ts: changed `trade.id` to `trade.transactionHash` for deduplication |
+| 2026-01-07 | Fixed type errors in trades.ts: updated `convertSubgraphTrade` and `convertDataApiTrade` to return full AggregatedTrade objects with fills array |
+| 2026-01-07 | Updated all test fixtures to use AggregatedTrade shape: trades.test.ts, cli.test.ts, integration/analyze.test.ts |
+| 2026-01-07 | Updated integration test to use lower alertThreshold (60) to match candidate threshold calculation |
+| 2026-01-07 | **Aggregate Trades Implementation Complete**: All 15 tasks done, 200 tests pass, signals now score transactions instead of individual fills |
+| 2026-01-08 | Fixed weight display bug: removed erroneous `* 100` multiplication (was showing 4000% instead of 40%) |
+| 2026-01-08 | Fixed signal score formatting: removed `/100` suffixes, added proper column padding for table alignment |
+| 2026-01-08 | Fixed outcome detection: added `outcomeIndex` to ResolvedToken, now uses index-based mapping instead of string matching (fixes non-binary markets like "Up"/"Down") |

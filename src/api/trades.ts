@@ -280,18 +280,26 @@ export class TradeFetcher {
     }
 
     return {
-      id: st.transactionHash,
+      transactionHash: st.transactionHash,
       marketId: conditionId,
       wallet,
       side,
       outcome,
-      size,
-      price,
+      totalSize: size,
+      avgPrice: price,
+      totalValueUsd: valueUsd,
       timestamp: new Date(st.timestamp * 1000),
-      valueUsd,
-      maker: st.maker,
-      taker: st.taker,
-      role,
+      fills: [{
+        id: st.id,
+        size,
+        price,
+        valueUsd,
+        timestamp: st.timestamp,
+        maker: st.maker,
+        taker: st.taker,
+        role,
+      }],
+      fillCount: 1,
     };
   }
 
@@ -407,17 +415,26 @@ export class TradeFetcher {
   private convertDataApiTrade(raw: DataApiTrade, marketId: string): Trade {
     const size = typeof raw.size === 'string' ? parseFloat(raw.size) : raw.size;
     const price = typeof raw.price === 'string' ? parseFloat(raw.price) : raw.price;
+    const valueUsd = size * price;
 
     return {
-      id: raw.transactionHash,
+      transactionHash: raw.transactionHash,
       marketId,
       wallet: raw.proxyWallet,
       side: raw.side,
       outcome: raw.outcome.toUpperCase() as 'YES' | 'NO',
-      size,
-      price,
+      totalSize: size,
+      avgPrice: price,
+      totalValueUsd: valueUsd,
       timestamp: new Date(raw.timestamp * 1000),
-      valueUsd: size * price,
+      fills: [{
+        id: raw.transactionHash,
+        size,
+        price,
+        valueUsd,
+        timestamp: raw.timestamp,
+      }],
+      fillCount: 1,
     };
   }
 }

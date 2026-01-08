@@ -105,17 +105,19 @@ program
   .requiredOption('-w, --wallet <address>', 'Wallet address to investigate')
   .option('-m, --market <conditionId>', 'Filter to a specific market (condition ID)')
   .option('--trades <number>', 'Number of recent trades to fetch (default: 500)', parseInt)
-  .option('--analyze-limit <number>', 'Number of trades to analyze for suspicious patterns (default: 100, 0 to disable)', parseInt)
+  .option('--threshold <score>', 'Override alert threshold (default: 70)', parseFloat)
   .option('--config <path>', 'Path to config file', './config.json')
   .option('--no-subgraph', 'Disable subgraph and use Data API only')
+  .option('--debug', 'Show detailed score breakdowns for each trade')
   .action(async (opts) => {
     const config = loadConfig(opts.config);
 
     // Apply CLI overrides
     if (opts.subgraph === false) config.subgraph.enabled = false;
+    if (opts.threshold) config.alertThreshold = opts.threshold;
 
     const command = new InvestigateCommand(config);
-    const reporter = new CLIReporter();
+    const reporter = new CLIReporter({ debug: opts.debug });
 
     try {
       console.log(`Investigating wallet: ${opts.wallet}...\n`);
@@ -123,7 +125,6 @@ program
       const report = await command.execute({
         wallet: opts.wallet,
         tradeLimit: opts.trades,
-        analyzeLimit: opts.analyzeLimit,
         market: opts.market,
       });
 

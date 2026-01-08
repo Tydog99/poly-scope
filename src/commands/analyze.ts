@@ -8,6 +8,9 @@ import { TradeClassifier } from '../signals/classifier.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
 import { getMarketResolver } from '../api/market-resolver.js';
+import { aggregateFills } from '../api/aggregator.js';
+import type { Market, SubgraphTrade } from '../api/types.js';
+import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -91,144 +94,65 @@ export class AnalyzeCommand {
         before: options.before,
       });
 
-      // Resolve token IDs to YES/NO outcomes
+      // Filter by role before aggregation
+      const walletRole = options.role ?? 'maker';
+      const walletLower = options.wallet.toLowerCase();
+      let filteredFills = subgraphTrades;
+      if (walletRole === 'taker') {
+        filteredFills = subgraphTrades.filter(t => t.taker.toLowerCase() === walletLower);
+      } else if (walletRole === 'maker') {
+        filteredFills = subgraphTrades.filter(t => t.maker.toLowerCase() === walletLower);
+      }
+      // walletRole === 'both' keeps all fills
+
+      console.log(`Found ${filteredFills.length} ${walletRole} fills for wallet on this market`);
+
+      // Resolve token IDs to YES/NO outcomes for aggregation
       const resolver = getMarketResolver();
       const resolvedTokens = await resolver.resolveBatch(marketTokenIds);
+      const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedTokens);
 
-      // Convert SubgraphTrade to Trade format
-      allTrades = subgraphTrades.map(st => {
-        const resolved = resolvedTokens.get(st.marketId.toLowerCase());
-        const outcome = resolved?.outcome === 'Yes' ? 'YES' : resolved?.outcome === 'No' ? 'NO' : 'YES';
-
-        // Determine wallet's action (maker vs taker)
-        const isMaker = st.maker.toLowerCase() === options.wallet!.toLowerCase();
-        const walletSide = isMaker
-          ? (st.side === 'Buy' ? 'BUY' : 'SELL')
-          : (st.side === 'Buy' ? 'SELL' : 'BUY');
-
-        const valueUsd = parseFloat(st.size) / 1e6;
-        const price = parseFloat(st.price);
-
-        return {
-          id: st.id,
-          marketId: st.marketId,
-          wallet: options.wallet!.toLowerCase(),
-          side: walletSide as 'BUY' | 'SELL',
-          outcome: outcome as 'YES' | 'NO',
-          size: valueUsd / price, // Approximate shares
-          price,
-          timestamp: new Date(st.timestamp * 1000),
-          valueUsd,
-          maker: st.maker,
-          taker: st.taker,
-          role: isMaker ? 'maker' : 'taker',
-        };
-      });
-
-      // Filter by role - default to maker-only for wallet analysis (avoids double-counting)
-      // Use options.role directly to check if user specified, otherwise default to 'maker'
-      const walletRole = options.role ?? 'maker';
-      if (walletRole === 'taker') {
-        allTrades = allTrades.filter(t => t.role === 'taker');
-      } else if (walletRole === 'maker') {
-        allTrades = allTrades.filter(t => t.role === 'maker');
-      }
-      // walletRole === 'both' keeps all trades
-
-      console.log(`Found ${allTrades.length} ${walletRole} fills for wallet on this market`);
-
-      // === STEP 2: Aggregate fills by transaction hash ===
-      // Each txHash+outcome combo becomes one aggregated trade
-      const txMap = new Map<string, typeof allTrades[0]>();
-      for (const trade of allTrades) {
-        // Extract txHash from trade ID (format: "txHash-logIndex" or just "txHash")
-        const txHash = trade.id.includes('-') ? trade.id.split('-')[0] : trade.id;
-        const key = `${txHash}|${trade.outcome}`;
-
-        if (!txMap.has(key)) {
-          txMap.set(key, { ...trade });
-        } else {
-          const agg = txMap.get(key)!;
-          // Weighted average price
-          const newValueUsd = agg.valueUsd + trade.valueUsd;
-          agg.price = (agg.price * agg.valueUsd + trade.price * trade.valueUsd) / newValueUsd;
-          agg.valueUsd = newValueUsd;
-          agg.size += trade.size;
-          // Keep earliest timestamp
-          if (trade.timestamp < agg.timestamp) {
-            agg.timestamp = trade.timestamp;
-          }
-        }
-      }
-      const aggregatedTrades = [...txMap.values()];
-      console.log(`Aggregated to ${aggregatedTrades.length} transactions`);
-
-      // === STEP 3: Filter complementary trades ===
       // Fetch positions to determine which token wallet has position in
       const positions = await this.subgraphClient.getPositions(options.wallet);
-      const yesTokenId = marketTokenIds[0];
-      const noTokenId = marketTokenIds[1];
 
-      const hasYesPosition = positions.some(p =>
-        p.marketId.toLowerCase() === yesTokenId?.toLowerCase() &&
-        parseFloat(p.netQuantity) > 0
-      );
-      const hasNoPosition = positions.some(p =>
-        p.marketId.toLowerCase() === noTokenId?.toLowerCase() &&
-        parseFloat(p.netQuantity) > 0
-      );
-
-      // Group aggregated trades by txHash to identify complementary
-      const txGroups = new Map<string, { yes?: typeof aggregatedTrades[0], no?: typeof aggregatedTrades[0] }>();
-      for (const trade of aggregatedTrades) {
-        const txHash = trade.id.includes('-') ? trade.id.split('-')[0] : trade.id;
-        if (!txGroups.has(txHash)) {
-          txGroups.set(txHash, {});
-        }
-        const group = txGroups.get(txHash)!;
-        if (trade.outcome === 'YES') {
-          group.yes = trade;
-        } else {
-          group.no = trade;
-        }
-      }
-
-      // Identify complementary trades
-      const complementaryIds = new Set<string>();
-      for (const [txHash, group] of txGroups) {
-        // Only mark complementary if BOTH YES and NO traded in same tx
-        if (group.yes && group.no) {
-          let complementaryOutcome: 'YES' | 'NO';
-          if (hasYesPosition && !hasNoPosition) {
-            // Wallet has YES position → NO trades are complementary
-            complementaryOutcome = 'NO';
-          } else if (hasNoPosition && !hasYesPosition) {
-            // Wallet has NO position → YES trades are complementary
-            complementaryOutcome = 'YES';
-          } else {
-            // Both or neither → smaller value side is complementary
-            complementaryOutcome = group.yes.valueUsd <= group.no.valueUsd ? 'YES' : 'NO';
-          }
-          const compTrade = complementaryOutcome === 'YES' ? group.yes : group.no;
-          complementaryIds.add(compTrade.id);
-        }
-      }
-
-      // Filter out complementary trades
-      allTrades = aggregatedTrades.filter(t => !complementaryIds.has(t.id));
-      if (complementaryIds.size > 0) {
-        console.log(`Filtered ${complementaryIds.size} complementary trades`);
-      }
-      console.log(`Final: ${allTrades.length} non-complementary transactions`);
-    } else {
-      // NORMAL MODE: Fetch all market trades (uses cache)
-      allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
-        market,
-        after: options.after,
-        before: options.before,
-        maxTrades: options.maxTrades,
-        role,
+      // Use centralized aggregateFills() to aggregate and filter complementary trades
+      allTrades = aggregateFills(filteredFills, {
+        wallet: options.wallet,
+        tokenToOutcome,
+        walletPositions: positions,
       });
+
+      console.log(`Aggregated to ${allTrades.length} non-complementary transactions`);
+    } else {
+      // NORMAL MODE: Fetch raw fills from subgraph, then aggregate per wallet
+      const hasTokens = market.tokens && market.tokens.length > 0;
+
+      if (this.subgraphClient && hasTokens) {
+        const tokenToOutcome = buildTokenToOutcome(market);
+
+        // Get raw fills (not pre-aggregated) for aggregation
+        const rawFills = await this.fetchRawFills(market, options);
+
+        if (rawFills.length > 0) {
+          // Aggregate fills per wallet to handle:
+          // 1. Multiple fills in same tx -> one aggregated trade
+          // 2. Maker/taker double-counting -> pick higher value role
+          // 3. Complementary trades (YES+NO in same tx) -> filter smaller side
+          allTrades = aggregateFillsPerWallet(rawFills, tokenToOutcome);
+          console.log(`Aggregated ${rawFills.length} fills to ${allTrades.length} trades`);
+        } else {
+          allTrades = [];
+        }
+      } else {
+        // Fallback to Data API or no subgraph (already converted to Trade format)
+        allTrades = await this.tradeFetcher.getTradesForMarket(options.marketId, {
+          market,
+          after: options.after,
+          before: options.before,
+          maxTrades: options.maxTrades,
+          role,
+        });
+      }
     }
 
     // 3. Filter trades
@@ -288,7 +212,7 @@ export class AnalyzeCommand {
       if (
         !options.wallet &&
         this.config.filters.excludeSafeBets &&
-        trade.price >= this.config.filters.safeBetThreshold &&
+        trade.avgPrice >= this.config.filters.safeBetThreshold &&
         (trade.side === 'BUY' || trade.side === 'SELL')
       ) {
         safeBetsFiltered++;
@@ -404,5 +328,34 @@ export class AnalyzeCommand {
       targetWallet: options.wallet,
       targetAccountHistory: options.wallet ? targetAccountHistory : undefined,
     };
+  }
+
+  /**
+   * Fetch raw fills from subgraph for aggregation
+   */
+  private async fetchRawFills(
+    market: Market,
+    options: AnalyzeOptions
+  ): Promise<SubgraphTrade[]> {
+    if (!this.subgraphClient) return [];
+
+    const totalLimit = options.maxTrades ?? 10000;
+    const perTokenLimit = Math.ceil(totalLimit / market.tokens.length);
+
+    const allFills: SubgraphTrade[] = [];
+    for (const token of market.tokens) {
+      console.log(`Fetching fills for ${token.outcome} token (${token.tokenId.slice(0, 10)}...)...`);
+      const fills = await this.subgraphClient.getTradesByMarket(token.tokenId, {
+        limit: perTokenLimit,
+        after: options.after,
+        before: options.before,
+        orderDirection: 'desc',
+      });
+      allFills.push(...fills);
+    }
+
+    // Sort by timestamp descending
+    allFills.sort((a, b) => b.timestamp - a.timestamp);
+    return allFills.slice(0, totalLimit);
   }
 }

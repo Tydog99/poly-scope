@@ -1,10 +1,11 @@
-import type { Signal, SignalResult, Trade, SignalContext, AccountHistory } from './types.js';
+import type { Signal, SignalResult, SignalContext, AccountHistory } from './types.js';
+import type { AggregatedTrade } from '../api/types.js';
 
 export class AccountHistorySignal implements Signal {
   name = 'accountHistory';
   weight = 35;
 
-  async calculate(trade: Trade, context: SignalContext): Promise<SignalResult> {
+  async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
     const { config, accountHistory } = context;
     const { maxLifetimeTrades, maxAccountAgeDays, minDormancyDays } = config.accountHistory;
 
