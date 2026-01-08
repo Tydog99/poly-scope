@@ -57,6 +57,75 @@ npm run dev -- analyze -m <market> --cache-account-lookup
 
 Trades are cached locally in `.cache/trades/` to avoid re-fetching on subsequent runs. The cache stores trades by market ID and only fetches new trades on subsequent runs.
 
+## Real-Time Monitoring
+
+Watch markets live for suspicious trading activity:
+
+```bash
+# Monitor markets from config watchlist
+npm run dev -- monitor
+
+# Monitor specific markets
+npm run dev -- monitor -m maduro-yes,bitcoin-100k
+
+# Lower threshold to catch more potential cases
+npm run dev -- monitor --threshold 50
+
+# Verbose mode shows all evaluated trades
+npm run dev -- monitor -m maduro-yes --verbose --min-size 1000
+```
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     WebSocket Trade Event                        │
+│  { proxyWallet, side, size, price, outcome, slug, timestamp }   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │ Size >= minSize? │
+                    └─────────────────┘
+                         │         │
+                        No        Yes
+                         │         │
+                         ▼         ▼
+                      [skip]   Fetch account
+                               from subgraph
+                                   │
+                                   ▼
+                         ┌─────────────────┐
+                         │  Run 3 signals  │
+                         └─────────────────┘
+                                   │
+                                   ▼
+                         ┌─────────────────┐
+                         │ Score >= thresh?│
+                         └─────────────────┘
+                              │         │
+                             No        Yes
+                              │         │
+                              ▼         ▼
+                          [skip]    ALERT
+```
+
+### Output Colors
+
+| Element | Color |
+|---------|-------|
+| YES outcome | Blue |
+| NO outcome | Yellow |
+| Alert banner | Red |
+| Score >= threshold | Red |
+
+### Connection Handling
+
+The monitor auto-reconnects on disconnect with exponential backoff:
+- Sequence: 1s -> 2s -> 4s -> 8s -> 16s -> 30s (max)
+- After 10 failed reconnects, waits 5 minutes then retries
+- Connection resets reconnect counter after 60s of stability
+
 ## Polymarket Data API Limitations
 
 ### Trade Cap (Varies by Market)

@@ -1,6 +1,7 @@
 import chalk, { type ChalkInstance } from 'chalk';
 import type { AnalysisReport, SuspiciousTrade } from './types.js';
 import type { WalletReport } from '../commands/investigate.js';
+import type { EvaluatedTrade } from '../monitor/types.js';
 
 // Colors for repeat wallets (excluding cyan which is for single-appearance)
 const WALLET_COLORS: ChalkInstance[] = [
@@ -398,6 +399,7 @@ export class CLIReporter {
 
     lines.push(`    Wallet: ${chalk.cyan(this.formatWalletLink(st.trade.wallet))}`);
     lines.push(`    Trade: ${this.formatUsd(st.trade.totalValueUsd)} ${st.trade.outcome} @ ${st.trade.avgPrice.toFixed(2)}`);
+
 
     if (st.priceImpact) {
       lines.push(`    Impact: ${st.priceImpact.before.toFixed(2)} → ${st.priceImpact.after.toFixed(2)} (+${st.priceImpact.changePercent}%)`);
@@ -1153,4 +1155,81 @@ export class CLIReporter {
 
     return '  ' + cols.join('  ');
   }
+}
+
+/**
+ * Create OSC 8 terminal hyperlink to Polymarket profile
+ */
+function walletLink(wallet: string): string {
+  const profileUrl = `https://polymarket.com/profile/${wallet}`;
+  return `\x1b]8;;${profileUrl}\x07${wallet}\x1b]8;;\x07`;
+}
+
+/**
+ * Format a trade for verbose monitor output
+ * Color: YES = blue, NO = yellow
+ */
+export function formatMonitorTrade(evaluated: EvaluatedTrade, useColors = true): string {
+  const { event, score, isAlert } = evaluated;
+  const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
+  const walletDisplay = walletLink(event.proxyWallet);
+  const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
+  const outcomeColored = useColors
+    ? (outcome === 'YES' ? chalk.blue(outcome) : chalk.yellow(outcome))
+    : outcome;
+
+  const scoreStr = useColors && isAlert ? chalk.red(score.toString()) : score.toString();
+  const alertMarker = isAlert ? (useColors ? chalk.red(' ALERT') : ' ALERT') : '';
+
+  return `[${time}] ${event.slug} | ${walletDisplay} | ${event.side} $${valueUsd} ${outcomeColored} | Score: ${scoreStr}${alertMarker}`;
+}
+
+/**
+ * Format a full alert with signal breakdown
+ */
+export function formatMonitorAlert(evaluated: EvaluatedTrade, marketQuestion: string): string {
+  const { event, score, signals, account } = evaluated;
+  const time = new Date(event.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false });
+  const walletDisplay = walletLink(event.proxyWallet);
+  const valueUsd = (event.size * event.price).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  const outcome = event.outcomeIndex === 0 ? 'YES' : 'NO';
+  const outcomeColored = outcome === 'YES' ? chalk.blue(outcome) : chalk.yellow(outcome);
+
+  const accountInfo = account
+    ? `${account.totalTrades} trades`
+    : 'unknown history';
+
+  const lines = [
+    '',
+    chalk.red(`ALERT [${time}]`) + ' ' + '-'.repeat(50),
+    `  Market:  ${marketQuestion}`,
+    `  Wallet:  ${walletDisplay} (${accountInfo})`,
+    `  Trade:   ${event.side} $${valueUsd} ${outcomeColored} @ $${event.price.toFixed(2)}`,
+    `  Score:   ${chalk.red(score.toString())}/100`,
+    '',
+    '  Signals:',
+    `    Trade Size:      ${signals.tradeSize.score}/100 (${signals.tradeSize.weight}%) -> ${signals.tradeSize.weighted.toFixed(1)}`,
+    `    Account History: ${signals.accountHistory.score}/100 (${signals.accountHistory.weight}%) -> ${signals.accountHistory.weighted.toFixed(1)}`,
+    `    Conviction:      ${signals.conviction.score}/100 (${signals.conviction.weight}%) -> ${signals.conviction.weighted.toFixed(1)}`,
+    '-'.repeat(68),
+  ];
+
+  return lines.join('\n');
+}
+
+/**
+ * Format monitor startup banner
+ */
+export function formatMonitorBanner(markets: string[], threshold: number, minSize: number): string {
+  const lines = [
+    '+' + '-'.repeat(66) + '+',
+    '|  ' + chalk.bold('POLYMARKET MONITOR') + ' '.repeat(47) + '|',
+    `|  Watching ${markets.length} market${markets.length === 1 ? '' : 's'} for suspicious activity` + ' '.repeat(Math.max(0, 28 - markets.length.toString().length)) + '|',
+    `|  Alert threshold: ${threshold} | Min size: $${minSize.toLocaleString()}` + ' '.repeat(Math.max(0, 30 - threshold.toString().length - minSize.toLocaleString().length)) + '|',
+    '+' + '-'.repeat(66) + '+',
+  ];
+  return lines.join('\n');
 }

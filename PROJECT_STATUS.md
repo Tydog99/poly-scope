@@ -10,7 +10,7 @@ Last updated: 2026-01-07
 - **Test Status**: All 201 tests passing across 18 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
-### Implemented Commands (2)
+### Implemented Commands (3)
 
 1. **`analyze`** - Market forensic analysis
    - Analyzes trades for a specific market (by slug or condition ID)
@@ -27,6 +27,14 @@ Last updated: 2026-01-07
    - Runs wallet's trades through the suspicious trade analyzer (same 3-signal system as `analyze`)
    - `--analyze-limit <n>` flag controls how many trades to analyze (default: 100, 0 to disable)
    - `-m/--market` flag filters to a specific market at the GraphQL query level (not post-fetch)
+
+3. **`monitor`** - Real-time market surveillance
+   - Watches markets via RTDS WebSocket for suspicious trades
+   - Alerts when trades score above threshold (default 70)
+   - Quick-filters by minimum trade size (default $5k)
+   - Auto-reconnects with exponential backoff
+   - Color-coded output: YES (blue), NO (yellow)
+   - Uses 5-minute in-memory cache for account lookups
 
 ### Three Weighted Detection Signals
 
@@ -107,7 +115,7 @@ Last updated: 2026-01-07
 
 | Module | Tests | Status | Notes |
 |--------|-------|--------|-------|
-| `config.test.ts` | 3 tests | Pass | Config loading, defaults, overrides |
+| `config.test.ts` | 4 tests | Pass | Config loading, defaults, overrides, monitor config |
 | `signals/tradeSize.test.ts` | 4 tests | Pass | Threshold, size scaling, market impact |
 | `signals/accountHistory.test.ts` | 10 tests | Pass | All scoring components, edge cases |
 | `signals/conviction.test.ts` | 4 tests | Pass | Concentration scoring |
@@ -148,10 +156,10 @@ The subgraph client has advanced methods that aren't integrated into the main co
 
 - [ ] Batch wallet investigation (analyze multiple wallets at once)
 - [ ] Cross-market analysis (investigate trading patterns across multiple markets)
-- [ ] Watchlist support (mentioned in config but not implemented)
+- [x] ~~Watchlist support~~ - Implemented via `monitor` command config watchlist
 - [ ] Persistence layer for investigation results
 - [ ] Export formats (CSV, JSON reports)
-- [ ] Real-time monitoring mode
+- [x] ~~Real-time monitoring mode~~ - Implemented via `monitor` command
 - [ ] Alert notifications (email, webhook, Discord)
 
 ### Auth Module
@@ -211,18 +219,16 @@ The subgraph client has advanced methods that aren't integrated into the main co
 - No console warnings - Clean build output
 
 ### Areas for Improvement
-- Unused auth module (orphaned code path)
 - Scripts directory has old debug/orphaned scripts
 - getTradesByTimeRange/Size methods implemented but not integrated
-- No real-time monitoring capability
-- Watchlist config field unused
 
 ---
 
 ## 7. Dependency Analysis
 
-**Production Dependencies** (5):
+**Production Dependencies** (6):
 - `@polymarket/clob-client` - Official Polymarket SDK
+- `@polymarket/real-time-data-client` - WebSocket client for real-time trade data
 - `chalk` - Terminal colors
 - `commander` - CLI argument parsing
 - `dotenv` - Environment variable loading
@@ -247,12 +253,12 @@ The subgraph client has advanced methods that aren't integrated into the main co
 | Subgraph integration | Working | Primary data source |
 | Data API fallback | Working | With caching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 77/77 passing |
+| Test suite | Working | 200/200 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
-| Real-time monitoring | Not implemented | No event loop |
-| Watchlist feature | Not implemented | Config present but unused |
+| Real-time monitoring | Working | `monitor` command with WebSocket |
+| Watchlist feature | Working | Used by `monitor` command |
 | Auth for CLOB API | Not implemented | Module exists, not used |
 | Batch wallet analysis | Not implemented | Can only analyze one wallet |
 | Export formats | Not implemented | CLI only |
@@ -282,14 +288,19 @@ src/
 │   └── types.ts      - Signal types
 ├── commands/         (CLI commands)
 │   ├── analyze.ts    - Market analysis
-│   └── investigate.ts - Wallet investigation
+│   ├── investigate.ts - Wallet investigation
+│   └── monitor.ts    - Real-time monitoring command
+├── monitor/          (Real-time monitoring)
+│   ├── stream.ts     - WebSocket wrapper with reconnection
+│   ├── evaluator.ts  - Real-time trade evaluator with session cache
+│   └── types.ts      - Monitor type definitions
 ├── output/           (Formatting)
 │   ├── cli.ts        - Terminal output
 │   └── types.ts      - Output types
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (14 test files, 77 tests)
+tests/ (20 test files, 200 tests)
 scripts/ (3 utilities)
 docs/ (Planning documents)
 ```
@@ -313,11 +324,11 @@ docs/ (Planning documents)
 - [ ] Whale Following signal
 - [ ] Batch wallet investigation command
 - [ ] Export formats (JSON/CSV)
-- [ ] Watchlist support
+- [x] ~~Watchlist support~~ - Implemented via `monitor` command config watchlist
 - [x] ~~**Market name resolution**~~ - Fixed! Uses Gamma API `clob_token_ids` param with repeated format.
 
 ### Advanced Features
-- [ ] Real-time monitoring mode
+- [x] ~~Real-time monitoring mode~~ - Implemented via `monitor` command
 - [ ] Alert notifications (webhooks, Discord, email)
 - [ ] Persistence layer for results
 - [ ] Web dashboard
@@ -364,6 +375,13 @@ docs/ (Planning documents)
 | 2026-01-07 | Added trade count caching to `.cache/trade-counts/` with incremental saves after each batch |
 | 2026-01-07 | Added `-w/--wallet` filter to analyze command: filters trades to specific wallet, shows all trades (not just alerts), skips safe bet filter |
 | 2026-01-07 | Added `formatWalletAnalysis` output function for verbose wallet-targeted analysis: account header, trades summary table, detailed signal breakdowns |
+| 2026-01-07 | Added `@polymarket/real-time-data-client` dependency (v1.4.0) for real-time monitoring feature |
+| 2026-01-07 | Added monitor type definitions (`src/monitor/types.ts`): RTDSTradeEvent, EvaluatedTrade, MonitorConfig, ConnectionState, MonitorOptions |
+| 2026-01-07 | Added monitor configuration to config system: maxReconnects, retryDelaySeconds, stabilityThresholdSeconds, backoff settings with defaults |
+| 2026-01-07 | Added WebSocket stream wrapper (`src/monitor/stream.ts`): MonitorStream class with exponential backoff reconnection, ConnectionStatus handling, stability timer for reset |
+| 2026-01-07 | Added trade evaluator (`src/monitor/evaluator.ts`): MonitorEvaluator class with session cache (5-min TTL), reuses existing signals (TradeSizeSignal, AccountHistorySignal, ConvictionSignal), normalizes RTDSTradeEvent to Trade type |
+| 2026-01-07 | Added monitor output formatters (`src/output/cli.ts`): `formatMonitorTrade()` for verbose trade lines, `formatMonitorAlert()` for full alert with signal breakdown, `formatMonitorBanner()` for startup display. YES=blue, NO=yellow colors. |
+| 2026-01-07 | Added monitor command (`src/commands/monitor.ts`): `executeMonitor()` ties together MonitorStream, MonitorEvaluator, AccountFetcher. Supports -m markets, --min-size, --threshold, --verbose flags. Graceful shutdown on SIGINT. Resolves slugs via SlugResolver before subscribing. |
 | 2026-01-07 | Added `TradeFill` and `AggregatedTrade` types for transaction-level trade aggregation |
 | 2026-01-07 | Added `aggregateFills` function in `src/api/aggregator.ts` with basic grouping by transaction hash |
 | 2026-01-07 | Added weighted average price test for aggregateFills in `tests/api/aggregator.test.ts` |
