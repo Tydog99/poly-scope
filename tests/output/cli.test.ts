@@ -151,6 +151,23 @@ function createMockResolvedToken(overrides: Partial<ResolvedToken> = {}): Resolv
   };
 }
 
+function createMockAggregatedTrade(overrides: Partial<Trade> = {}): Trade {
+  return {
+    transactionHash: '0xabc123def456789',
+    marketId: '12345678901234567890',
+    wallet: '0x1234567890abcdef1234567890abcdef12345678',
+    side: 'BUY',
+    outcome: 'YES',
+    totalSize: 50000,
+    totalValueUsd: 6000,
+    avgPrice: 0.12,
+    timestamp: new Date('2024-01-15T10:30:00Z'),
+    fills: [],
+    fillCount: 1,
+    ...overrides,
+  };
+}
+
 function createMockWalletReport(overrides: Partial<WalletReport> = {}): WalletReport {
   return {
     wallet: '0x1234567890abcdef1234567890abcdef12345678',
@@ -158,6 +175,7 @@ function createMockWalletReport(overrides: Partial<WalletReport> = {}): WalletRe
     positions: [createMockSubgraphPosition()],
     redemptions: [],
     recentTrades: [createMockSubgraphTrade()],
+    aggregatedTrades: [createMockAggregatedTrade()],
     suspicionFactors: ['No obvious suspicion factors detected'],
     dataSource: 'subgraph',
     ...overrides,
@@ -900,9 +918,8 @@ describe('CLIReporter', () => {
         expect(output).toContain('Market:');
       });
 
-      it('aggregates multiple fills in same transaction', () => {
+      it('shows aggregated trade value', () => {
         const tokenId = '12345678901234567890';
-        const txHash = '0xabc123';
         const wallet = '0x1234567890abcdef1234567890abcdef12345678';
 
         const resolvedMarkets = new Map<string, ResolvedToken>([
@@ -912,21 +929,15 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           wallet,
           positions: [createMockSubgraphPosition({ marketId: tokenId })],
-          recentTrades: [
-            createMockSubgraphTrade({
-              transactionHash: txHash,
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
+              transactionHash: '0xabc123',
               marketId: tokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '1000000000', // $1000
-            }),
-            createMockSubgraphTrade({
-              id: 'trade-2',
-              transactionHash: txHash,
-              marketId: tokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '2000000000', // $2000
+              wallet,
+              side: 'BUY',
+              totalValueUsd: 3000, // Aggregated value
+              fillCount: 2,
             }),
           ],
           resolvedMarkets,
@@ -948,21 +959,21 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           wallet,
           positions: [createMockSubgraphPosition({ marketId: tokenId })],
-          recentTrades: [
-            createMockSubgraphTrade({
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
               transactionHash: '0xtx1',
               marketId: tokenId,
-              maker: wallet,
-              side: 'Buy',
-              timestamp: 1705312200,
+              wallet,
+              side: 'BUY',
+              timestamp: new Date(1705312200 * 1000),
             }),
-            createMockSubgraphTrade({
-              id: 'trade-2',
+            createMockAggregatedTrade({
               transactionHash: '0xtx2',
               marketId: tokenId,
-              maker: wallet,
-              side: 'Sell',
-              timestamp: 1705312300,
+              wallet,
+              side: 'SELL',
+              timestamp: new Date(1705312300 * 1000),
             }),
           ],
           resolvedMarkets,
@@ -973,147 +984,91 @@ describe('CLIReporter', () => {
         expect(output).toContain('Sell');
       });
 
-      it('filters out taker trades (complementary trades)', () => {
+      it('displays aggregated trades from pre-computed data', () => {
         const tokenId = '12345678901234567890';
         const wallet = '0x1234567890abcdef1234567890abcdef12345678';
-        const otherWallet = '0xother';
 
         const resolvedMarkets = new Map<string, ResolvedToken>([
           [tokenId, createMockResolvedToken({ tokenId })],
         ]);
 
+        // Aggregated trades are pre-computed by the aggregator (complementary trades already filtered)
         const report = createMockWalletReport({
           wallet,
           positions: [createMockSubgraphPosition({ marketId: tokenId })],
-          recentTrades: [
-            // Maker trade - should be included
-            createMockSubgraphTrade({
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
               transactionHash: '0xtx1',
               marketId: tokenId,
-              maker: wallet,
-              taker: otherWallet,
-              side: 'Buy',
-              size: '5000000000',
-            }),
-            // Taker trade - should be filtered out
-            createMockSubgraphTrade({
-              id: 'trade-2',
-              transactionHash: '0xtx2',
-              marketId: tokenId,
-              maker: otherWallet,
-              taker: wallet,
-              side: 'Sell',
-              size: '3000000000',
+              wallet,
+              side: 'BUY',
+              totalValueUsd: 5000,
             }),
           ],
           resolvedMarkets,
         });
         const output = reporter.formatWalletReport(report);
 
-        // Should show the maker trade value
+        // Should show the aggregated trade value
         expect(output).toContain('$5,000');
-        // Taker trade should not show as a separate line
       });
 
-      it('marks complementary YES/NO trades using position data', () => {
+      it('groups trades by market question', () => {
         const yesTokenId = '11111111111111111111';
-        const noTokenId = '22222222222222222222';
         const wallet = '0x1234567890abcdef1234567890abcdef12345678';
-        const txHash = '0xsameTx';
 
         const resolvedMarkets = new Map<string, ResolvedToken>([
-          [yesTokenId, createMockResolvedToken({ tokenId: yesTokenId, question: 'Test?', outcome: 'Yes' })],
-          [noTokenId, createMockResolvedToken({ tokenId: noTokenId, question: 'Test?', outcome: 'No' })],
+          [yesTokenId, createMockResolvedToken({ tokenId: yesTokenId, question: 'Test Question?', outcome: 'Yes' })],
         ]);
 
         const report = createMockWalletReport({
           wallet,
-          // Wallet only has position in YES token
           positions: [createMockSubgraphPosition({ marketId: yesTokenId })],
-          recentTrades: [
-            // YES token trade - wallet's real intent
-            createMockSubgraphTrade({
-              transactionHash: txHash,
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
+              transactionHash: '0xtx1',
               marketId: yesTokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '5000000000',
-            }),
-            // NO token trade - complementary from split/merge
-            createMockSubgraphTrade({
-              id: 'trade-2',
-              transactionHash: txHash,
-              marketId: noTokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '5000000000',
+              wallet,
+              side: 'BUY',
+              outcome: 'YES',
+              totalValueUsd: 5000,
             }),
           ],
           resolvedMarkets,
         });
         const output = reporter.formatWalletReport(report);
 
-        // Should show YES trades (wallet has YES position)
+        // Should show market name with outcome
+        expect(output).toContain('Test Question?');
         expect(output).toContain('(Yes)');
-        // NO trades are now shown but marked as complementary
-        expect(output).toContain('(No)');
-
-        // Count lines that contain market display with (Yes) vs (No)
-        const lines = output.split('\n');
-        const yesMarketLines = lines.filter(l => l.includes('Test?') && l.includes('(Yes)'));
-        const noMarketLines = lines.filter(l => l.includes('Test?') && l.includes('(No)'));
-
-        // Both should be shown
-        expect(yesMarketLines.length).toBeGreaterThan(0);
-        expect(noMarketLines.length).toBeGreaterThan(0);
-
-        // The transaction has both YES and NO trades - smaller side (YES=$5k) should be marked [C]
-        // The NO side has same value ($5k) so with <= comparison, YES is marked as complementary
-        expect(output).toContain('[C]');
       });
 
-      it('falls back to higher value when no position data', () => {
-        const yesTokenId = '11111111111111111111';
-        const noTokenId = '22222222222222222222';
+      it('shows outcome from aggregated trade when resolved markets unavailable', () => {
+        const tokenId = '11111111111111111111';
         const wallet = '0x1234567890abcdef1234567890abcdef12345678';
-        const txHash = '0xsameTx';
-
-        const resolvedMarkets = new Map<string, ResolvedToken>([
-          [yesTokenId, createMockResolvedToken({ tokenId: yesTokenId, question: 'Test?', outcome: 'Yes' })],
-          [noTokenId, createMockResolvedToken({ tokenId: noTokenId, question: 'Test?', outcome: 'No' })],
-        ]);
 
         const report = createMockWalletReport({
           wallet,
-          // No positions (both tokens traded but neither held)
           positions: [],
-          recentTrades: [
-            // YES token trade - higher value
-            createMockSubgraphTrade({
-              transactionHash: txHash,
-              marketId: yesTokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '10000000000', // $10,000 (higher)
-              price: '500000', // 0.50
-            }),
-            // NO token trade - lower value
-            createMockSubgraphTrade({
-              id: 'trade-2',
-              transactionHash: txHash,
-              marketId: noTokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '5000000000', // $5,000 (lower)
-              price: '500000',
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
+              transactionHash: '0xtx1',
+              marketId: tokenId,
+              wallet,
+              side: 'BUY',
+              outcome: 'YES',
+              totalValueUsd: 10000,
             }),
           ],
-          resolvedMarkets,
+          resolvedMarkets: new Map(), // No resolved markets
         });
         const output = reporter.formatWalletReport(report);
 
-        // Should prefer YES trades (higher value)
-        expect(output).toContain('(Yes)');
+        // Should fall back to outcome from aggregated trade
+        expect(output).toContain('(YES)');
       });
 
       it('shows market totals for each market', () => {
@@ -1127,21 +1082,21 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           wallet,
           positions: [createMockSubgraphPosition({ marketId: tokenId })],
-          recentTrades: [
-            createMockSubgraphTrade({
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
               transactionHash: '0xtx1',
               marketId: tokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '3000000000',
+              wallet,
+              side: 'BUY',
+              totalValueUsd: 3000,
             }),
-            createMockSubgraphTrade({
-              id: 'trade-2',
+            createMockAggregatedTrade({
               transactionHash: '0xtx2',
               marketId: tokenId,
-              maker: wallet,
-              side: 'Buy',
-              size: '2000000000',
+              wallet,
+              side: 'BUY',
+              totalValueUsd: 2000,
             }),
           ],
           resolvedMarkets,
@@ -1155,6 +1110,7 @@ describe('CLIReporter', () => {
       it('handles empty trades array', () => {
         const report = createMockWalletReport({
           recentTrades: [],
+          aggregatedTrades: [],
         });
         const output = reporter.formatWalletReport(report);
 
@@ -1169,10 +1125,11 @@ describe('CLIReporter', () => {
         const report = createMockWalletReport({
           wallet,
           positions: [createMockSubgraphPosition({ marketId: unresolvedTokenId })],
-          recentTrades: [
-            createMockSubgraphTrade({
+          recentTrades: [],
+          aggregatedTrades: [
+            createMockAggregatedTrade({
               marketId: unresolvedTokenId,
-              maker: wallet,
+              wallet,
             }),
           ],
           // No resolved markets
@@ -1180,7 +1137,7 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatWalletReport(report);
 
-        // Should still show the trade with truncated token ID
+        // Should still show the trade with truncated token ID as the market key
         expect(output).toContain('9999999999');
       });
     });

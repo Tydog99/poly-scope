@@ -2,6 +2,7 @@ import chalk, { type ChalkInstance } from 'chalk';
 import type { AnalysisReport, SuspiciousTrade } from './types.js';
 import type { WalletReport } from '../commands/investigate.js';
 import type { EvaluatedTrade } from '../monitor/types.js';
+import type { AggregatedTrade } from '../api/types.js';
 
 // Colors for repeat wallets (excluding cyan which is for single-appearance)
 const WALLET_COLORS: ChalkInstance[] = [
@@ -745,325 +746,96 @@ export class CLIReporter {
       lines.push('');
     }
 
-    // Recent Trades - grouped by market, aggregated by transaction
-    if (report.recentTrades.length > 0) {
-      lines.push(chalk.bold(`Recent Trades (${report.recentTrades.length} fills):`));
+    // Recent Trades - show aggregated trades (one per transaction)
+    if (report.aggregatedTrades && report.aggregatedTrades.length > 0) {
+      lines.push(chalk.bold(`Recent Trades (${report.aggregatedTrades.length} transactions):`));
       lines.push('');
 
-      // Aggregate trades by market and transaction hash, tracking maker/taker separately
-      interface RoleFills {
-        buyValue: number;
-        sellValue: number;
-        avgBuyPrice: number;
-        avgSellPrice: number;
-        fillCount: number;
-      }
-      interface AggregatedTrade {
-        txHash: string;
-        timestamp: number;
-        maker: RoleFills;
-        taker: RoleFills;
-        isComplementary: boolean;  // True if this token is opposite of wallet's main position
-      }
-
-      // Step 1: Identify complementary trades at the TRANSACTION level
-      // When a single tx has trades on both YES and NO tokens, one is likely complementary
-
-      // Build a set of token IDs the wallet has positions in
-      const positionTokenIds = new Set<string>();
-      for (const pos of report.positions) {
-        positionTokenIds.add(pos.marketId);
-      }
-
-      // Map each token to its "sibling" token (YES<->NO for same condition)
-      const tokenToQuestion = new Map<string, string>();
-      const questionToTokens = new Map<string, { yes?: string; no?: string }>();
-      for (const [tokenId, resolved] of report.resolvedMarkets?.entries() ?? []) {
-        tokenToQuestion.set(tokenId, resolved.question);
-        if (!questionToTokens.has(resolved.question)) {
-          questionToTokens.set(resolved.question, {});
-        }
-        const pair = questionToTokens.get(resolved.question)!;
-        if (resolved.outcome === 'Yes') {
-          pair.yes = tokenId;
-        } else {
-          pair.no = tokenId;
-        }
-      }
-
-      // Group trades by (txHash, question) to find transactions with both YES and NO
-      interface TxQuestionGroup {
-        yesTrades: typeof report.recentTrades;
-        noTrades: typeof report.recentTrades;
-        yesTokenId?: string;
-        noTokenId?: string;
-      }
-      const txQuestionGroups = new Map<string, TxQuestionGroup>();
-
-      for (const trade of report.recentTrades) {
+      // Group trades by market (question)
+      const tradesByMarket = new Map<string, AggregatedTrade[]>();
+      for (const trade of report.aggregatedTrades) {
         const resolved = report.resolvedMarkets?.get(trade.marketId);
-        if (!resolved) continue;
-
-        const groupKey = `${trade.transactionHash}|${resolved.question}`;
-        if (!txQuestionGroups.has(groupKey)) {
-          txQuestionGroups.set(groupKey, { yesTrades: [], noTrades: [] });
+        const marketKey = resolved?.question ?? trade.marketId;
+        if (!tradesByMarket.has(marketKey)) {
+          tradesByMarket.set(marketKey, []);
         }
-
-        const group = txQuestionGroups.get(groupKey)!;
-        if (resolved.outcome === 'Yes') {
-          group.yesTrades.push(trade);
-          group.yesTokenId = trade.marketId;
-        } else {
-          group.noTrades.push(trade);
-          group.noTokenId = trade.marketId;
-        }
+        tradesByMarket.get(marketKey)!.push(trade);
       }
 
-      // Build set of (txHash, tokenId) pairs that are complementary
-      const complementaryTxTokens = new Set<string>();
-
-      for (const [groupKey, group] of txQuestionGroups) {
-        // Only process transactions with trades on BOTH tokens
-        if (group.yesTrades.length === 0 || group.noTrades.length === 0) {
-          continue;
-        }
-
-        const txHash = groupKey.split('|')[0];
-        const hasYesPosition = group.yesTokenId && positionTokenIds.has(group.yesTokenId);
-        const hasNoPosition = group.noTokenId && positionTokenIds.has(group.noTokenId);
-
-        // Calculate total value for each side
-        const yesValue = group.yesTrades.reduce((sum, t) => sum + parseFloat(t.size) / 1e6, 0);
-        const noValue = group.noTrades.reduce((sum, t) => sum + parseFloat(t.size) / 1e6, 0);
-
-        let complementaryTokenId: string | undefined;
-
-        if (hasYesPosition && !hasNoPosition) {
-          // Wallet has YES position only - NO trades are complementary
-          complementaryTokenId = group.noTokenId;
-        } else if (hasNoPosition && !hasYesPosition) {
-          // Wallet has NO position only - YES trades are complementary
-          complementaryTokenId = group.yesTokenId;
-        } else {
-          // Wallet has both or neither - SMALLER value side is complementary
-          // (the larger side is the "main intent", smaller is the balancing action)
-          complementaryTokenId = yesValue <= noValue ? group.yesTokenId : group.noTokenId;
-        }
-
-        if (complementaryTokenId) {
-          complementaryTxTokens.add(`${txHash}|${complementaryTokenId}`);
-        }
-      }
-
-      // Helper to check if a specific (txHash, tokenId) is complementary
-      const isComplementaryTrade = (txHash: string, tokenId: string): boolean => {
-        return complementaryTxTokens.has(`${txHash}|${tokenId}`);
-      };
-
-      const tradesByMarket = new Map<string, Map<string, AggregatedTrade>>();
-
-      // Step 2: Aggregate ALL trades by market and transaction (both maker and taker)
-      for (const trade of report.recentTrades) {
-        const marketId = trade.marketId || 'unknown';
-
-        if (!tradesByMarket.has(marketId)) {
-          tradesByMarket.set(marketId, new Map());
-        }
-
-        const marketTrades = tradesByMarket.get(marketId)!;
-        const txHash = trade.transactionHash;
-
-        if (!marketTrades.has(txHash)) {
-          marketTrades.set(txHash, {
-            txHash,
-            timestamp: trade.timestamp,
-            maker: { buyValue: 0, sellValue: 0, avgBuyPrice: 0, avgSellPrice: 0, fillCount: 0 },
-            taker: { buyValue: 0, sellValue: 0, avgBuyPrice: 0, avgSellPrice: 0, fillCount: 0 },
-            isComplementary: isComplementaryTrade(txHash, marketId),
-          });
-        }
-
-        const agg = marketTrades.get(txHash)!;
-        const size = parseFloat(trade.size) / 1e6;  // size is USD value, not shares
-        const price = parseFloat(trade.price);
-        const value = size;  // size already represents USD value
-
-        // Determine if wallet is maker or taker
-        const isMaker = trade.maker.toLowerCase() === report.wallet.toLowerCase();
-        const roleFills = isMaker ? agg.maker : agg.taker;
-
-        // Determine wallet's action:
-        // - Maker: side field matches their action
-        // - Taker: side field is OPPOSITE (they're taking the other side)
-        const walletAction = isMaker
-          ? trade.side
-          : (trade.side === 'Buy' ? 'Sell' : 'Buy');
-
-        if (walletAction === 'Buy') {
-          roleFills.avgBuyPrice = (roleFills.avgBuyPrice * roleFills.buyValue + price * value) / (roleFills.buyValue + value || 1);
-          roleFills.buyValue += value;
-        } else {
-          roleFills.avgSellPrice = (roleFills.avgSellPrice * roleFills.sellValue + price * value) / (roleFills.sellValue + value || 1);
-          roleFills.sellValue += value;
-        }
-        roleFills.fillCount++;
-      }
-
-      // Convert to sorted arrays
+      // Sort markets by latest trade timestamp
       const sortedMarkets = [...tradesByMarket.entries()]
-        .map(([marketId, txMap]) => ({
-          marketId,
-          // Count how many trades are complementary vs not for sorting
-          complementaryCount: [...txMap.values()].filter(t => t.isComplementary).length,
-          trades: [...txMap.values()]
-            .filter(t => t.maker.fillCount > 0 || t.taker.fillCount > 0)  // Any fills
-            .sort((a, b) => b.timestamp - a.timestamp),
+        .map(([question, trades]) => ({
+          question,
+          trades: trades.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
         }))
-        .filter(m => m.trades.length > 0)  // Only markets with trades
-        .sort((a, b) => {
-          // Sort by timestamp (no special complementary ordering at market level)
-          const aLatest = Math.max(...a.trades.map(t => t.timestamp));
-          const bLatest = Math.max(...b.trades.map(t => t.timestamp));
-          return bLatest - aLatest;
-        });
+        .sort((a, b) => b.trades[0].timestamp.getTime() - a.trades[0].timestamp.getTime());
 
-      // Count unique transactions
-      const totalTxns = sortedMarkets.reduce((sum, m) => sum + m.trades.length, 0);
-      lines.push(chalk.gray(`  ${totalTxns} transactions across ${sortedMarkets.length} markets`));
+      lines.push(chalk.gray(`  ${report.aggregatedTrades.length} transactions across ${sortedMarkets.length} markets`));
       lines.push('');
 
-      // Table header - Role: [M]=maker (limit order filled), [T]=taker (market order)
+      // Table header
       lines.push(
-        chalk.gray('  Date              Time      Role  Side         Value       Price   Fills   TxHash')
+        chalk.gray('  Date    Time      Side         Value       Price   Fills   TxHash')
       );
-      lines.push(chalk.gray('  ' + '─'.repeat(90)));
+      lines.push(chalk.gray('  ' + '─'.repeat(72)));
 
-      // Helper to format a trade line with role indicator
-      const formatTradeLine = (
-        dateStr: string,
-        timeStr: string,
-        role: 'M' | 'T',
-        side: 'Buy' | 'Sell',
-        value: number,
-        avgPrice: number,
-        fillCount: number,
-        txHash: string,
-        isComplementary: boolean
-      ): string => {
-        const roleIndicator = role === 'M' ? chalk.blue('[M]') : chalk.yellow('[T]');
-        const sideFormatted = side === 'Buy' ? chalk.green('Buy'.padEnd(6)) : chalk.red('Sell'.padEnd(6));
-        const valueStr = this.formatUsd(value).padStart(12);
-        const priceStr = `@${avgPrice.toFixed(2).padStart(5)}`;
-        const fillsStr = String(fillCount).padStart(3);
-        const txHashStr = chalk.gray(txHash.slice(0, 10) + '...');
+      for (const { question, trades } of sortedMarkets) {
+        // Get outcome from first trade
+        const firstTrade = trades[0];
+        const resolved = report.resolvedMarkets?.get(firstTrade.marketId);
+        const outcomeDisplay = resolved?.outcome ?? firstTrade.outcome;
+        const marketDisplay = this.truncateQuestion(question, 50) + chalk.gray(` (${outcomeDisplay})`);
 
-        // Dim complementary trades
-        if (isComplementary) {
-          return chalk.dim(
-            `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${role === 'M' ? '[M]' : '[T]'}   ${side.padEnd(6)} ` +
-            `${valueStr}  ${priceStr}   ${fillsStr}    ${txHash.slice(0, 10)}...` +
-            chalk.dim.yellow(' [C]')
-          );
-        }
+        lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
 
-        return `  ${dateStr.padEnd(14)} ${timeStr.padEnd(8)} ${roleIndicator}   ${sideFormatted} ` +
-          `${valueStr}  ${priceStr}   ${fillsStr}    ${txHashStr}`;
-      };
+        // Track totals for this market
+        let totalBuyValue = 0, totalSellValue = 0, totalFills = 0;
 
-      for (const { marketId, complementaryCount, trades } of sortedMarkets) {
-        // Market header with resolved name or truncated ID
-        const resolved = report.resolvedMarkets?.get(marketId);
-        const marketDisplay = resolved
-          ? this.truncateQuestion(resolved.question, 45) + chalk.gray(` (${resolved.outcome})`)
-          : chalk.gray(marketId.length > 20 ? marketId.slice(0, 10) + '...' + marketId.slice(-8) : marketId);
-
-        // Add complementary count to market header if any
-        const complementaryBadge = complementaryCount > 0
-          ? chalk.dim.yellow(` [${complementaryCount} complementary txs]`)
-          : '';
-        lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}${complementaryBadge}`);
-
-        // Track totals for this market (separate maker/taker)
-        let makerBuyValue = 0, makerSellValue = 0, makerFills = 0;
-        let takerBuyValue = 0, takerSellValue = 0, takerFills = 0;
-
-        // Show all aggregated trades
-        for (const agg of trades) {
-          const date = new Date(agg.timestamp * 1000);
-          const txHash = agg.txHash;
-
-          const dateStr = date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: '2-digit',
-          });
+        for (const trade of trades) {
+          const date = trade.timestamp;
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          const dateStr = `${month}-${day}`;
           const timeStr = date.toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
             hour12: false,
           });
 
-          // Show maker fills first (use agg.isComplementary for per-transaction marking)
-          // Only count non-complementary trades in totals (complementary are order routing artifacts)
-          if (agg.maker.buyValue > 0) {
-            if (!agg.isComplementary) {
-              makerBuyValue += agg.maker.buyValue;
-              makerFills += agg.maker.fillCount;
-            }
-            lines.push(formatTradeLine(dateStr, timeStr, 'M', 'Buy', agg.maker.buyValue, agg.maker.avgBuyPrice, agg.maker.fillCount, txHash, agg.isComplementary));
-          }
-          if (agg.maker.sellValue > 0) {
-            if (!agg.isComplementary) {
-              makerSellValue += agg.maker.sellValue;
-              makerFills += agg.maker.fillCount;
-            }
-            lines.push(formatTradeLine(dateStr, timeStr, 'M', 'Sell', agg.maker.sellValue, agg.maker.avgSellPrice, agg.maker.fillCount, txHash, agg.isComplementary));
-          }
+          const sideFormatted = trade.side === 'BUY' ? chalk.green('Buy'.padEnd(6)) : chalk.red('Sell'.padEnd(6));
+          const valueStr = this.formatUsd(trade.totalValueUsd).padStart(12);
+          const priceStr = `@${trade.avgPrice.toFixed(2).padStart(5)}`;
+          const fillsStr = String(trade.fillCount).padStart(3);
+          const txHashStr = chalk.gray(trade.transactionHash.slice(0, 10) + '...');
 
-          // Show taker fills
-          if (agg.taker.buyValue > 0) {
-            if (!agg.isComplementary) {
-              takerBuyValue += agg.taker.buyValue;
-              takerFills += agg.taker.fillCount;
-            }
-            lines.push(formatTradeLine(dateStr, timeStr, 'T', 'Buy', agg.taker.buyValue, agg.taker.avgBuyPrice, agg.taker.fillCount, txHash, agg.isComplementary));
+          lines.push(`  ${dateStr}  ${timeStr}  ${sideFormatted} ${valueStr}  ${priceStr}   ${fillsStr}    ${txHashStr}`);
+
+          if (trade.side === 'BUY') {
+            totalBuyValue += trade.totalValueUsd;
+          } else {
+            totalSellValue += trade.totalValueUsd;
           }
-          if (agg.taker.sellValue > 0) {
-            if (!agg.isComplementary) {
-              takerSellValue += agg.taker.sellValue;
-              takerFills += agg.taker.fillCount;
-            }
-            lines.push(formatTradeLine(dateStr, timeStr, 'T', 'Sell', agg.taker.sellValue, agg.taker.avgSellPrice, agg.taker.fillCount, txHash, agg.isComplementary));
-          }
+          totalFills += trade.fillCount;
         }
 
-        // Show market totals with role breakdown
-        const totalBuyValue = makerBuyValue + takerBuyValue;
-        const totalSellValue = makerSellValue + takerSellValue;
-        const totalFills = makerFills + takerFills;
-
+        // Show market totals
         if (totalBuyValue > 0 || totalSellValue > 0) {
           const totals: string[] = [];
           if (totalBuyValue > 0) {
-            const breakdown = [];
-            if (makerBuyValue > 0) breakdown.push(`M:${this.formatUsd(makerBuyValue)}`);
-            if (takerBuyValue > 0) breakdown.push(`T:${this.formatUsd(takerBuyValue)}`);
-            totals.push(chalk.green(`Bought ${this.formatUsd(totalBuyValue)}`) + chalk.gray(` (${breakdown.join(', ')})`));
+            totals.push(chalk.green(`Bought ${this.formatUsd(totalBuyValue)}`));
           }
           if (totalSellValue > 0) {
-            const breakdown = [];
-            if (makerSellValue > 0) breakdown.push(`M:${this.formatUsd(makerSellValue)}`);
-            if (takerSellValue > 0) breakdown.push(`T:${this.formatUsd(takerSellValue)}`);
-            totals.push(chalk.red(`Sold ${this.formatUsd(totalSellValue)}`) + chalk.gray(` (${breakdown.join(', ')})`));
+            totals.push(chalk.red(`Sold ${this.formatUsd(totalSellValue)}`));
           }
-          lines.push(`  ${''.padEnd(14)} ${''.padEnd(8)} ${''.padEnd(6)} ${chalk.bold('Total'.padEnd(6))} ` +
+          lines.push(`  ${''.padEnd(5)}  ${''.padEnd(5)}  ${chalk.bold('Total'.padEnd(6))} ` +
             `${totals.join(' | ')} ${chalk.gray(`(${totalFills} fills)`)}`);
         }
         lines.push('');
       }
-
-      // Add legend
-      lines.push(chalk.gray('  Legend: [M]=Maker (limit order filled) | [T]=Taker (market order) | [C]=Complementary trade'));
+    } else if (report.recentTrades.length > 0) {
+      // Fallback: show fill count if aggregation failed
+      lines.push(chalk.bold(`Recent Trades (${report.recentTrades.length} fills):`));
+      lines.push(chalk.gray('  (Trade aggregation unavailable - raw fills not displayed)'));
       lines.push('');
     }
 

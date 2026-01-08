@@ -5,7 +5,7 @@ import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
 import type { AccountHistory, SignalContext } from '../signals/types.js';
-import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption } from '../api/types.js';
+import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption, AggregatedTrade } from '../api/types.js';
 import type { SuspiciousTrade } from '../output/types.js';
 import { aggregateFills } from '../api/aggregator.js';
 import { buildTokenToOutcomeFromResolved, scoreTrades } from './shared.js';
@@ -33,6 +33,7 @@ export interface WalletReport {
   positions: SubgraphPosition[];
   redemptions: SubgraphRedemption[];
   recentTrades: SubgraphTrade[];
+  aggregatedTrades?: AggregatedTrade[]; // Transaction-level aggregated trades (no complementary)
   suspicionFactors: string[];
   dataSource: 'subgraph' | 'data-api' | 'subgraph-trades' | 'subgraph-estimated' | 'cache';
   resolvedMarkets?: Map<string, ResolvedToken>;
@@ -197,12 +198,13 @@ export class InvestigateCommand {
     // Run trades through suspicious trade analyzer
     let suspiciousTrades: SuspiciousTrade[] | undefined;
     let analyzedTradeCount: number | undefined;
+    let aggregatedTrades: AggregatedTrade[] | undefined;
 
     if (recentTrades.length > 0 && resolvedMarketsMap) {
       const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedMarketsMap);
 
       // Aggregate fills by transaction, filtering complementary trades
-      const aggregatedTrades = aggregateFills(recentTrades, {
+      aggregatedTrades = aggregateFills(recentTrades, {
         wallet: normalizedWallet,
         tokenToOutcome,
         walletPositions: positions,
@@ -261,6 +263,7 @@ export class InvestigateCommand {
       positions,
       redemptions,
       recentTrades,
+      aggregatedTrades,
       suspicionFactors,
       dataSource: accountHistory?.dataSource ?? 'data-api',
       resolvedMarkets: resolvedMarketsMap,
