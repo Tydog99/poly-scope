@@ -276,5 +276,59 @@ describe('aggregateFills', () => {
       expect(result[0].side).toBe('BUY'); // Taker's side is opposite
       expect(result[0].fills[0].role).toBe('taker');
     });
+
+    it('prevents double-counting when wallet is both maker and taker in same tx', () => {
+      // Real-world case: wallet places limit order that gets filled ($7215 as maker)
+      // but also appears as taker in small fills in same tx ($1488 as taker)
+      // Should only count the primary (higher value) role
+      const fills: SubgraphTrade[] = [
+        // Wallet as MAKER - the primary trade ($7215)
+        {
+          id: '0xtx1-maker',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xinsider',
+          taker: '0xother',
+          marketId: 'token-yes',
+          side: 'Buy', // Maker is buying
+          size: '7215000000', // $7215
+          price: '0.08',
+        },
+        // Wallet as TAKER - secondary fills that shouldn't be counted
+        {
+          id: '0xtx1-taker1',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmarket',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell', // Maker sells, taker buys
+          size: '1000000000', // $1000
+          price: '0.09',
+        },
+        {
+          id: '0xtx1-taker2',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          maker: '0xmarket2',
+          taker: '0xinsider',
+          marketId: 'token-yes',
+          side: 'Sell',
+          size: '488000000', // $488
+          price: '0.08',
+        },
+      ];
+
+      const result = aggregateFills(fills, baseOptions);
+
+      // Should only have 1 aggregated trade
+      expect(result).toHaveLength(1);
+
+      // Should only include the MAKER fills (higher value = $7215)
+      // NOT the taker fills ($1488 total)
+      expect(result[0].totalValueUsd).toBe(7215);
+      expect(result[0].fillCount).toBe(1);
+      expect(result[0].fills[0].role).toBe('maker');
+    });
   });
 });

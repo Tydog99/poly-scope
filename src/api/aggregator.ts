@@ -9,6 +9,7 @@ export interface AggregationOptions {
 interface FillGroup {
   txHash: string;
   outcome: 'YES' | 'NO';
+  role: 'maker' | 'taker';
   fills: SubgraphTrade[];
   totalValueUsd: number;
 }
@@ -20,27 +21,53 @@ export function aggregateFills(
   const { wallet, tokenToOutcome, walletPositions = [] } = options;
   const walletLower = wallet.toLowerCase();
 
-  // Step 1: Group fills by transactionHash + outcome
+  // Step 1: Group fills by transactionHash + outcome + role
+  // This prevents double-counting when wallet is both maker and taker in same tx
   const groups = new Map<string, FillGroup>();
 
   for (const fill of fills) {
     const txHash = fill.transactionHash;
     const outcome = tokenToOutcome.get(fill.marketId.toLowerCase()) ?? 'YES';
-    const key = `${txHash}|${outcome}`;
+    const isMaker = fill.maker.toLowerCase() === walletLower;
+    const role: 'maker' | 'taker' = isMaker ? 'maker' : 'taker';
+    const key = `${txHash}|${outcome}|${role}`;
     const valueUsd = parseFloat(fill.size) / 1e6;
 
     if (!groups.has(key)) {
-      groups.set(key, { txHash, outcome, fills: [], totalValueUsd: 0 });
+      groups.set(key, { txHash, outcome, role, fills: [], totalValueUsd: 0 });
     }
     const group = groups.get(key)!;
     group.fills.push(fill);
     group.totalValueUsd += valueUsd;
   }
 
+  // Step 1b: Per tx+outcome, keep only the role with higher USD value
+  // This handles cases where wallet appears as both maker and taker in same tx
+  const txOutcomeGroups = new Map<string, FillGroup[]>();
+  for (const group of groups.values()) {
+    const key = `${group.txHash}|${group.outcome}`;
+    if (!txOutcomeGroups.has(key)) {
+      txOutcomeGroups.set(key, []);
+    }
+    txOutcomeGroups.get(key)!.push(group);
+  }
+
+  // Filter to keep only the primary role per tx+outcome
+  const filteredGroups: FillGroup[] = [];
+  for (const roleGroups of txOutcomeGroups.values()) {
+    if (roleGroups.length === 1) {
+      filteredGroups.push(roleGroups[0]);
+    } else {
+      // Pick the role with higher USD value (the "primary" trade)
+      const sorted = roleGroups.sort((a, b) => b.totalValueUsd - a.totalValueUsd);
+      filteredGroups.push(sorted[0]);
+    }
+  }
+
   // Step 2: Detect complementary trades per transaction
   // Group by txHash to find txs with both YES and NO
   const txToGroups = new Map<string, FillGroup[]>();
-  for (const group of groups.values()) {
+  for (const group of filteredGroups) {
     if (!txToGroups.has(group.txHash)) {
       txToGroups.set(group.txHash, []);
     }
@@ -97,8 +124,8 @@ export function aggregateFills(
       }
 
       const firstFill = group.fills[0];
-      const isMaker = firstFill.maker.toLowerCase() === walletLower;
-      const role: 'maker' | 'taker' = isMaker ? 'maker' : 'taker';
+      const role = group.role;
+      const isMaker = role === 'maker';
       const side: 'BUY' | 'SELL' = isMaker
         ? (firstFill.side === 'Buy' ? 'BUY' : 'SELL')
         : (firstFill.side === 'Buy' ? 'SELL' : 'BUY');
