@@ -8,6 +8,7 @@ import type { AccountHistory, SignalContext } from '../signals/types.js';
 import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption } from '../api/types.js';
 import type { SuspiciousTrade } from '../output/types.js';
 import { aggregateFills } from '../api/aggregator.js';
+import { buildTokenToOutcomeFromResolved, scoreTrades } from './shared.js';
 
 export interface InvestigateOptions {
   wallet: string;
@@ -179,17 +180,10 @@ export class InvestigateCommand {
     let analyzedTradeCount: number | undefined;
 
     if (recentTrades.length > 0 && resolvedMarketsMap) {
-      const tradesToAnalyze = recentTrades;
-
-      // Build tokenToOutcome map from resolved markets
-      const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
-      for (const [tokenId, resolved] of resolvedMarketsMap) {
-        const outcome = resolved.outcome === 'Yes' ? 'YES' : resolved.outcome === 'No' ? 'NO' : 'YES';
-        tokenToOutcome.set(tokenId.toLowerCase(), outcome);
-      }
+      const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedMarketsMap);
 
       // Aggregate fills by transaction, filtering complementary trades
-      const aggregatedTrades = aggregateFills(tradesToAnalyze, {
+      const aggregatedTrades = aggregateFills(recentTrades, {
         wallet: normalizedWallet,
         tokenToOutcome,
         walletPositions: positions,
@@ -203,23 +197,12 @@ export class InvestigateCommand {
         accountHistory: accountHistory ?? undefined,
       };
 
-      const scoredTrades: SuspiciousTrade[] = [];
-
-      for (const trade of aggregatedTrades) {
-        // Run through all signals
-        const results = await Promise.all(
-          this.signals.map(s => s.calculate(trade, context))
-        );
-        const score = this.aggregator.aggregate(results);
-
-        if (score.isAlert) {
-          scoredTrades.push({
-            trade,
-            score,
-            accountHistory: accountHistory ?? undefined,
-          });
-        }
-      }
+      const scoredTrades = await scoreTrades(
+        aggregatedTrades,
+        this.signals,
+        this.aggregator,
+        context
+      );
 
       // Sort by score descending
       scoredTrades.sort((a, b) => b.score.total - a.score.total);

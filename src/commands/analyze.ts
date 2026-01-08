@@ -10,6 +10,7 @@ import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
 import { getMarketResolver } from '../api/market-resolver.js';
 import { aggregateFills } from '../api/aggregator.js';
 import type { Market, SubgraphTrade } from '../api/types.js';
+import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -109,14 +110,7 @@ export class AnalyzeCommand {
       // Resolve token IDs to YES/NO outcomes for aggregation
       const resolver = getMarketResolver();
       const resolvedTokens = await resolver.resolveBatch(marketTokenIds);
-
-      // Build tokenToOutcome map for aggregator
-      const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
-      for (const tokenId of marketTokenIds) {
-        const resolved = resolvedTokens.get(tokenId.toLowerCase());
-        const outcome = resolved?.outcome === 'Yes' ? 'YES' : resolved?.outcome === 'No' ? 'NO' : 'YES';
-        tokenToOutcome.set(tokenId.toLowerCase(), outcome);
-      }
+      const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedTokens);
 
       // Fetch positions to determine which token wallet has position in
       const positions = await this.subgraphClient.getPositions(options.wallet);
@@ -134,11 +128,7 @@ export class AnalyzeCommand {
       const hasTokens = market.tokens && market.tokens.length > 0;
 
       if (this.subgraphClient && hasTokens) {
-        // Build token ID to outcome mapping for aggregation
-        const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
-        for (const token of market.tokens) {
-          tokenToOutcome.set(token.tokenId.toLowerCase(), token.outcome.toUpperCase() as 'YES' | 'NO');
-        }
+        const tokenToOutcome = buildTokenToOutcome(market);
 
         // Get raw fills (not pre-aggregated) for aggregation
         const rawFills = await this.fetchRawFills(market, options);
@@ -148,7 +138,7 @@ export class AnalyzeCommand {
           // 1. Multiple fills in same tx -> one aggregated trade
           // 2. Maker/taker double-counting -> pick higher value role
           // 3. Complementary trades (YES+NO in same tx) -> filter smaller side
-          allTrades = this.aggregateAllWalletTrades(rawFills, tokenToOutcome);
+          allTrades = aggregateFillsPerWallet(rawFills, tokenToOutcome);
           console.log(`Aggregated ${rawFills.length} fills to ${allTrades.length} trades`);
         } else {
           allTrades = [];
@@ -367,41 +357,5 @@ export class AnalyzeCommand {
     // Sort by timestamp descending
     allFills.sort((a, b) => b.timestamp - a.timestamp);
     return allFills.slice(0, totalLimit);
-  }
-
-  /**
-   * Aggregate fills per wallet using the same logic as aggregateFills().
-   * Groups fills by wallet, then aggregates each wallet's fills.
-   */
-  private aggregateAllWalletTrades(
-    fills: SubgraphTrade[],
-    tokenToOutcome: Map<string, 'YES' | 'NO'>
-  ): Trade[] {
-    // Group fills by wallet (using taker as the wallet - taker analysis)
-    const fillsByWallet = new Map<string, SubgraphTrade[]>();
-    for (const fill of fills) {
-      // Use taker as the wallet for insider detection (takers show urgency)
-      const wallet = fill.taker?.toLowerCase();
-      if (!wallet) continue;
-
-      if (!fillsByWallet.has(wallet)) {
-        fillsByWallet.set(wallet, []);
-      }
-      fillsByWallet.get(wallet)!.push(fill);
-    }
-
-    // Aggregate each wallet's fills
-    const allTrades: Trade[] = [];
-    for (const [wallet, walletFills] of fillsByWallet) {
-      const aggregated = aggregateFills(walletFills, {
-        wallet,
-        tokenToOutcome,
-      });
-      allTrades.push(...aggregated);
-    }
-
-    // Sort by timestamp descending
-    allTrades.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    return allTrades;
   }
 }
