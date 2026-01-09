@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 275 tests passing across 25 test files
+- **Test Status**: All 277 tests passing across 25 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -213,7 +213,7 @@ Historical analysis uses **current** account state instead of state **at the tim
 | AccountHistorySignal | `accountAgeDays` | **Fixed** | Was using `new Date()` instead of trade timestamp |
 | AccountHistorySignal | `totalTrades` | **Fixed** | Uses `historicalState.tradeCount` when available |
 | AccountHistorySignal | `profitUsd` | Bug | Early profits diluted by later losses |
-| ConvictionSignal | `totalVolumeUsd` | Bug | High-conviction bets appear diversified |
+| ConvictionSignal | `totalVolumeUsd` | **Fixed** | Uses `historicalState.volume` when available |
 
 See `docs/POINT_IN_TIME_BUG.md` for detailed analysis and proposed fixes.
 
@@ -444,3 +444,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Integrated TradeDB into AccountFetcher (`src/api/accounts.ts`): optional `tradeDb` option, checks DB first with 1-hour freshness window, saves fetched data back to DB; backward compatible - existing code without tradeDb works unchanged; 272 tests pass |
 | 2026-01-08 | Added `historicalState` field to SignalContext (`src/signals/types.ts`): optional point-in-time state (tradeCount, volume, pnl, approximate) from database for accurate historical analysis; Phase 4 of trade database implementation |
 | 2026-01-08 | Updated AccountHistorySignal to use `historicalState.tradeCount` when available: falls back to `accountHistory.totalTrades` for backward compatibility; reports `historicalTradeCount: true` in details when using point-in-time data; 3 new tests added (275 total); Task 4.2 complete |
+| 2026-01-08 | Updated ConvictionSignal to use `historicalState.volume` when available: converts from 6-decimal scaled integer to USD; falls back to `accountHistory.totalVolumeUsd` for backward compatibility; reports `usingHistoricalState: true` in details; 2 new tests added (277 total); Task 4.3 complete |

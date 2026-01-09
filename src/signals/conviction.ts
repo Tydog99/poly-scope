@@ -6,10 +6,15 @@ export class ConvictionSignal implements Signal {
   weight = 25;
 
   async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
-    const { accountHistory } = context;
+    const { accountHistory, historicalState } = context;
 
-    // If no account history, can't calculate conviction
-    if (!accountHistory || accountHistory.totalVolumeUsd === 0) {
+    // Use historical state if available, otherwise fall back to current
+    const priorVolume = historicalState
+      ? historicalState.volume / 1e6 // Convert from scaled integer
+      : (accountHistory?.totalVolumeUsd ?? 0);
+
+    // If no volume history, can't calculate conviction
+    if (priorVolume === 0 && (!accountHistory || accountHistory.totalVolumeUsd === 0)) {
       // New wallet with no history - high conviction by default
       return {
         name: this.name,
@@ -23,7 +28,8 @@ export class ConvictionSignal implements Signal {
     }
 
     // Calculate what percentage of their total volume this trade represents
-    const concentration = (trade.totalValueUsd / accountHistory.totalVolumeUsd) * 100;
+    const effectiveVolume = priorVolume > 0 ? priorVolume : (accountHistory?.totalVolumeUsd ?? 1);
+    const concentration = (trade.totalValueUsd / effectiveVolume) * 100;
 
     // Score based on concentration
     // 50%+ of volume in one trade = max score
@@ -48,8 +54,9 @@ export class ConvictionSignal implements Signal {
       weight: this.weight,
       details: {
         tradeValueUsd: trade.totalValueUsd,
-        totalVolumeUsd: accountHistory.totalVolumeUsd,
+        totalVolumeUsd: effectiveVolume,
         concentrationPercent: Math.round(concentration * 10) / 10,
+        ...(historicalState && { usingHistoricalState: true }),
       },
     };
   }
