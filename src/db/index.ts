@@ -62,6 +62,21 @@ export interface DBMarket {
   resolvedAt: number | null;
 }
 
+export interface DBMarketSync {
+  tokenId: string;
+  syncedFrom: number | null;
+  syncedTo: number | null;
+  syncedAt: number | null;
+  hasCompleteHistory: boolean;
+}
+
+export interface GetTradesForMarketOptions {
+  after?: number;
+  before?: number;
+  role?: 'maker' | 'taker' | 'both';
+  limit?: number;
+}
+
 export interface BackfillQueueItem {
   wallet: string;
   priority: number;
@@ -146,12 +161,35 @@ export class TradeDB {
     return this.db.prepare(sql).all(...params) as DBTrade[];
   }
 
-  getTradesForMarket(marketId: string): DBTrade[] {
-    return this.db.prepare(`
+  getTradesForMarket(marketId: string, options: GetTradesForMarketOptions = {}): DBTrade[] {
+    let sql = `
       SELECT id, tx_hash as txHash, wallet, market_id as marketId,
              timestamp, side, action, role, size, price, value_usd as valueUsd
-      FROM trades WHERE market_id = ? ORDER BY timestamp DESC
-    `).all(marketId) as DBTrade[];
+      FROM trades WHERE market_id = ?
+    `;
+    const params: (string | number)[] = [marketId];
+
+    if (options.after !== undefined) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.after);
+    }
+    if (options.before !== undefined) {
+      sql += ' AND timestamp <= ?';
+      params.push(options.before);
+    }
+    if (options.role && options.role !== 'both') {
+      sql += ' AND role = ?';
+      params.push(options.role);
+    }
+
+    sql += ' ORDER BY timestamp DESC';
+
+    if (options.limit !== undefined) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    return this.db.prepare(sql).all(...params) as DBTrade[];
   }
 
   saveAccount(account: DBAccount): void {
@@ -241,9 +279,16 @@ export class TradeDB {
   }
 
   saveMarkets(markets: DBMarket[]): number {
+    // Use UPSERT to update metadata but preserve sync columns (synced_from, synced_to, etc.)
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO markets (token_id, condition_id, question, outcome, outcome_index, resolved_at)
+      INSERT INTO markets (token_id, condition_id, question, outcome, outcome_index, resolved_at)
       VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(token_id) DO UPDATE SET
+        condition_id = excluded.condition_id,
+        question = excluded.question,
+        outcome = excluded.outcome,
+        outcome_index = excluded.outcome_index,
+        resolved_at = excluded.resolved_at
     `);
     let inserted = 0;
     const insertMany = this.db.transaction((markets: DBMarket[]) => {
@@ -262,6 +307,62 @@ export class TradeDB {
       FROM markets WHERE token_id = ?
     `).get(tokenId) as DBMarket | undefined;
     return row ?? null;
+  }
+
+  getMarketSync(tokenId: string): DBMarketSync | null {
+    const row = this.db.prepare(`
+      SELECT token_id as tokenId,
+             synced_from as syncedFrom,
+             synced_to as syncedTo,
+             synced_at as syncedAt,
+             has_complete_history as hasCompleteHistory
+      FROM markets WHERE token_id = ?
+    `).get(tokenId) as {
+      tokenId: string;
+      syncedFrom: number | null;
+      syncedTo: number | null;
+      syncedAt: number | null;
+      hasCompleteHistory: number | null;
+    } | undefined;
+
+    if (!row) return null;
+    return {
+      tokenId: row.tokenId,
+      syncedFrom: row.syncedFrom,
+      syncedTo: row.syncedTo,
+      syncedAt: row.syncedAt,
+      hasCompleteHistory: row.hasCompleteHistory === 1,
+    };
+  }
+
+  updateMarketSync(
+    tokenId: string,
+    sync: { syncedFrom?: number; syncedTo?: number; hasCompleteHistory?: boolean }
+  ): void {
+    const updates: string[] = [];
+    const params: (number | string)[] = [];
+
+    if (sync.syncedFrom !== undefined) {
+      updates.push('synced_from = ?');
+      params.push(sync.syncedFrom);
+    }
+    if (sync.syncedTo !== undefined) {
+      updates.push('synced_to = ?');
+      params.push(sync.syncedTo);
+    }
+    if (sync.hasCompleteHistory !== undefined) {
+      updates.push('has_complete_history = ?');
+      params.push(sync.hasCompleteHistory ? 1 : 0);
+    }
+
+    if (updates.length === 0) return;
+
+    updates.push("synced_at = strftime('%s', 'now')");
+    params.push(tokenId);
+
+    this.db.prepare(`
+      UPDATE markets SET ${updates.join(', ')} WHERE token_id = ?
+    `).run(...params);
   }
 
   queueBackfill(wallet: string, priority: number = 0): void {

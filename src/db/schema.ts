@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export function initializeSchema(db: Database.Database): void {
   // Enable WAL mode for better concurrency
@@ -51,14 +51,18 @@ export function initializeSchema(db: Database.Database): void {
       payout INTEGER NOT NULL
     );
 
-    -- Market metadata cache
+    -- Market metadata cache with sync tracking
     CREATE TABLE IF NOT EXISTS markets (
       token_id TEXT PRIMARY KEY,
       condition_id TEXT,
       question TEXT,
       outcome TEXT,
       outcome_index INTEGER,
-      resolved_at INTEGER
+      resolved_at INTEGER,
+      synced_from INTEGER,
+      synced_to INTEGER,
+      synced_at INTEGER,
+      has_complete_history INTEGER DEFAULT 0
     );
 
     -- Background job queue
@@ -76,6 +80,9 @@ export function initializeSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_redemptions_wallet ON redemptions(wallet);
   `);
 
+  // Run migrations for existing databases
+  runMigrations(db);
+
   // Record schema version if not exists
   const existing = db
     .prepare('SELECT version FROM schema_version WHERE version = ?')
@@ -83,5 +90,36 @@ export function initializeSchema(db: Database.Database): void {
 
   if (!existing) {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+  }
+}
+
+function runMigrations(db: Database.Database): void {
+  // Get current schema version
+  const currentVersion = db
+    .prepare('SELECT MAX(version) as version FROM schema_version')
+    .get() as { version: number | null } | undefined;
+
+  const version = currentVersion?.version ?? 0;
+
+  // Migration to version 2: Add sync columns to markets table
+  if (version < 2) {
+    // Check if columns already exist (in case of partial migration)
+    const columns = db
+      .prepare("PRAGMA table_info(markets)")
+      .all() as { name: string }[];
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('synced_from')) {
+      db.exec('ALTER TABLE markets ADD COLUMN synced_from INTEGER');
+    }
+    if (!columnNames.includes('synced_to')) {
+      db.exec('ALTER TABLE markets ADD COLUMN synced_to INTEGER');
+    }
+    if (!columnNames.includes('synced_at')) {
+      db.exec('ALTER TABLE markets ADD COLUMN synced_at INTEGER');
+    }
+    if (!columnNames.includes('has_complete_history')) {
+      db.exec('ALTER TABLE markets ADD COLUMN has_complete_history INTEGER DEFAULT 0');
+    }
   }
 }
