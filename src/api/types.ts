@@ -95,6 +95,12 @@ export interface SubgraphRedemption {
   conditionId: string;
 }
 
+export interface TradeCountData {
+  count: number;
+  firstTimestamp: number;
+  lastTimestamp: number;
+}
+
 // Aggregated trade types
 
 export interface TradeFill {

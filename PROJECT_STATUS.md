@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 286 tests passing across 26 test files
+- **Test Status**: All 257 tests passing across 23 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -449,3 +449,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added backfill runner (`src/db/backfill.ts`): `runBackfill()` processes queued wallets in priority order with configurable limits, `backfillWallet()` fetches all historical trades from subgraph with pagination and saves to DB, graceful error handling (doesn't mark complete on failure); 9 tests added (286 total); Task 5.1 complete |
 | 2026-01-08 | Added `db backfill` CLI command: `db backfill` processes queued wallets (default 10), `db backfill 0x...` backfills specific wallet, `--max <n>` limits wallets to process; requires THE_GRAPH_API_KEY; Task 5.2 complete |
 | 2026-01-08 | Integrated backfill triggers into commands: `analyze` drains up to 5 wallets from queue after analysis, `investigate` does blocking backfill of target wallet before analysis (if history incomplete), `monitor` opportunistically backfills up to 3 wallets after 30s idle; all failures are graceful (commands continue); 286 tests pass; Task 5.3 complete |
+| 2026-01-08 | Removed old JSON cache classes (Phase 6 cleanup): deleted `AccountCache`, `TradeCache`, `RedemptionCache`, `TradeCountCache` from `src/api/`; removed cache imports from `accounts.ts` and `trades.ts`; simplified TradeFetcher to fetch directly without caching; AccountFetcher now uses TradeDB exclusively for caching; deleted 4 cache files and 3 test files; moved `TradeCountData` type to `types.ts`; 257 tests pass |

@@ -1,7 +1,6 @@
 import type { Trade } from '../signals/types.js';
 import type { Market, SubgraphTrade } from './types.js';
 import type { SubgraphClient, TradeQueryOptions } from './subgraph.js';
-import { TradeCache } from './cache.js';
 
 const DATA_API = 'https://data-api.polymarket.com';
 
@@ -18,8 +17,6 @@ interface DataApiTrade {
 
 export interface TradeFetcherOptions {
   subgraphClient?: SubgraphClient | null;
-  cache?: TradeCache;
-  disableCache?: boolean;
 }
 
 export interface GetTradesOptions {
@@ -40,14 +37,10 @@ export interface GetTradesOptions {
 }
 
 export class TradeFetcher {
-  private cache: TradeCache;
   private subgraphClient: SubgraphClient | null;
-  private disableCache: boolean;
 
   constructor(options: TradeFetcherOptions = {}) {
-    this.cache = options.cache ?? new TradeCache();
     this.subgraphClient = options.subgraphClient ?? null;
-    this.disableCache = options.disableCache ?? false;
   }
 
   async getTradesForMarket(
@@ -56,41 +49,17 @@ export class TradeFetcher {
   ): Promise<Trade[]> {
     const maxTrades = options.maxTrades ?? 10000;
 
-    // Load cached data (unless caching disabled)
-    const cached = this.disableCache ? null : this.cache.load(marketId);
-
     // Try subgraph first if available AND we have token IDs
     if (this.subgraphClient && options.market?.tokens?.length) {
       try {
-        // Optimize: Use cache timestamp to only fetch new trades
-        const fetchOptions = { ...options };
-        if (cached?.newestTimestamp) {
-          const cachedDate = new Date(cached.newestTimestamp * 1000);
-          console.log(`Found ${cached.trades.length} cached trades (latest: ${cachedDate.toISOString()})`);
-
-          // If user didn't specify 'after', or if cache is newer than user's 'after', use cache
-          if (!options.after || cachedDate > options.after) {
-            fetchOptions.after = cachedDate;
-          }
-        }
-
-        const trades = await this.fetchFromSubgraph(marketId, fetchOptions);
+        const trades = await this.fetchFromSubgraph(marketId, options);
 
         if (trades.length > 0) {
-          console.log(`Synced ${trades.length} new trades from subgraph`);
-          // Merge with cache (unless caching disabled)
-          if (this.disableCache) {
-            const allTrades = cached ? [...cached.trades, ...trades] : trades;
-            return this.applyFilters(allTrades, options);
-          }
-          const merged = this.cache.merge(marketId, trades);
-          return this.applyFilters(merged.trades, options);
-        } else if (cached && cached.trades.length > 0) {
-          console.log('No new trades from subgraph, using cache');
-          return this.applyFilters(cached.trades, options);
+          console.log(`Fetched ${trades.length} trades from subgraph`);
+          return this.applyFilters(trades, options);
         }
 
-        // No trades from subgraph AND no cache - could be empty market or issue
+        // No trades from subgraph - could be empty market or issue
         if (options.allowDataApiFallback === false) {
           console.log('Subgraph returned no trades');
           return [];
@@ -105,7 +74,7 @@ export class TradeFetcher {
     }
 
     // Fall back to Data API
-    return this.fetchFromDataApi(marketId, options, maxTrades, cached);
+    return this.fetchFromDataApi(marketId, options, maxTrades);
   }
 
   /**
@@ -114,57 +83,17 @@ export class TradeFetcher {
   private async fetchFromDataApi(
     marketId: string,
     options: GetTradesOptions,
-    maxTrades: number,
-    cached: { newestTimestamp: number; trades: Trade[] } | null
+    maxTrades: number
   ): Promise<Trade[]> {
-    const newTrades = await this.fetchNewTradesFromDataApi(
-      marketId,
-      cached?.newestTimestamp ?? 0,
-      cached ? undefined : maxTrades
-    );
+    const trades = await this.fetchTradesFromDataApi(marketId, maxTrades);
 
-    let allTrades: Trade[];
-    let currentCount: number;
-
-    if (newTrades.length > 0) {
-      if (this.disableCache) {
-        allTrades = cached ? [...cached.trades, ...newTrades] : newTrades;
-        currentCount = allTrades.length;
-        console.log(`Fetched ${newTrades.length} new trades from Data API (cache disabled)`);
-      } else {
-        const merged = this.cache.merge(marketId, newTrades);
-        allTrades = merged.trades;
-        currentCount = allTrades.length;
-        console.log(`Fetched ${newTrades.length} new trades from Data API, total cached: ${currentCount}`);
-      }
-    } else if (cached) {
-      allTrades = cached.trades;
-      currentCount = allTrades.length;
-      console.log(`Using ${currentCount} cached trades (no new trades)`);
+    if (trades.length > 0) {
+      console.log(`Fetched ${trades.length} trades from Data API`);
     } else {
-      allTrades = [];
-      currentCount = 0;
       console.log('No trades found');
     }
 
-    // Backfill older trades if needed
-    if (currentCount > 0 && currentCount < maxTrades) {
-      const needed = maxTrades - currentCount;
-      console.log(`Backfilling ${needed} older trades...`);
-      const olderTrades = await this.fetchOlderTradesFromDataApi(marketId, currentCount, needed);
-      if (olderTrades.length > 0) {
-        if (this.disableCache) {
-          allTrades = [...allTrades, ...olderTrades];
-          console.log(`Fetched ${olderTrades.length} older trades (cache disabled)`);
-        } else {
-          const merged = this.cache.merge(marketId, olderTrades);
-          allTrades = merged.trades;
-          console.log(`Fetched ${olderTrades.length} older trades, total cached: ${allTrades.length}`);
-        }
-      }
-    }
-
-    return this.applyFilters(allTrades, options);
+    return this.applyFilters(trades, options);
   }
 
   /**
@@ -321,61 +250,12 @@ export class TradeFetcher {
 
   // --- Data API methods (fallback) ---
 
-  private async fetchNewTradesFromDataApi(
+  private async fetchTradesFromDataApi(
     marketId: string,
-    afterTimestamp: number,
-    maxTrades?: number
-  ): Promise<Trade[]> {
-    const trades: Trade[] = [];
-    let offset = 0;
-    const limit = 500;
-
-    while (true) {
-      const url = new URL(`${DATA_API}/trades`);
-      url.searchParams.set('market', marketId);
-      url.searchParams.set('limit', limit.toString());
-      url.searchParams.set('offset', offset.toString());
-
-      const response = await fetch(url.toString());
-      if (!response.ok) {
-        throw new Error(`Failed to fetch trades: ${response.statusText}`);
-      }
-
-      const rawTrades = (await response.json()) as DataApiTrade[];
-
-      if (rawTrades.length === 0) break;
-
-      let foundOld = false;
-      for (const raw of rawTrades) {
-        if (raw.timestamp <= afterTimestamp) {
-          foundOld = true;
-          break;
-        }
-        trades.push(this.convertDataApiTrade(raw, marketId));
-
-        if (maxTrades && trades.length >= maxTrades) {
-          console.log(`Reached max trades limit (${maxTrades})`);
-          return trades;
-        }
-      }
-
-      if (foundOld) break;
-      if (rawTrades.length < limit) break;
-
-      offset += limit;
-      console.log(`Fetching page ${offset / limit + 1}... (${trades.length} trades)`);
-    }
-
-    return trades;
-  }
-
-  private async fetchOlderTradesFromDataApi(
-    marketId: string,
-    startOffset: number,
     maxTrades: number
   ): Promise<Trade[]> {
     const trades: Trade[] = [];
-    let offset = startOffset;
+    let offset = 0;
     const limit = 500;
 
     while (trades.length < maxTrades) {
@@ -396,7 +276,7 @@ export class TradeFetcher {
       for (const raw of rawTrades) {
         trades.push(this.convertDataApiTrade(raw, marketId));
         if (trades.length >= maxTrades) {
-          console.log(`Reached backfill limit (${maxTrades})`);
+          console.log(`Reached max trades limit (${maxTrades})`);
           return trades;
         }
       }
@@ -404,9 +284,7 @@ export class TradeFetcher {
       if (rawTrades.length < limit) break;
 
       offset += limit;
-      console.log(
-        `Backfilling page ${Math.floor((offset - startOffset) / limit) + 1}... (${trades.length} older trades)`
-      );
+      console.log(`Fetching page ${offset / limit + 1}... (${trades.length} trades)`);
     }
 
     return trades;
