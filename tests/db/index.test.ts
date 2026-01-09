@@ -116,4 +116,58 @@ describe('TradeDB', () => {
       expect(trades).toHaveLength(1);
     });
   });
+
+  describe('accounts', () => {
+    const mockAccount = {
+      wallet: '0x123',
+      creationTimestamp: 1704067200,
+      syncedFrom: 1704067200,
+      syncedTo: 1704153600,
+      syncedAt: 1704240000,
+      tradeCountTotal: 100,
+      collateralVolume: 1000000000000,
+      profit: 50000000000,
+      hasFullHistory: false,
+    };
+
+    it('saves an account', () => {
+      tradeDb.saveAccount(mockAccount);
+      expect(tradeDb.getStatus().accounts).toBe(1);
+    });
+
+    it('retrieves an account by wallet', () => {
+      tradeDb.saveAccount(mockAccount);
+      const account = tradeDb.getAccount('0x123');
+      expect(account).not.toBeNull();
+      expect(account!.wallet).toBe('0x123');
+      expect(account!.tradeCountTotal).toBe(100);
+    });
+
+    it('returns null for non-existent account', () => {
+      expect(tradeDb.getAccount('0xnonexistent')).toBeNull();
+    });
+
+    it('updates existing account on save', () => {
+      tradeDb.saveAccount(mockAccount);
+      tradeDb.saveAccount({ ...mockAccount, syncedTo: 1704200000 });
+      expect(tradeDb.getAccount('0x123')!.syncedTo).toBe(1704200000);
+    });
+
+    it('normalizes wallet to lowercase', () => {
+      tradeDb.saveAccount({ ...mockAccount, wallet: '0xABC' });
+      expect(tradeDb.getAccount('0xabc')).not.toBeNull();
+    });
+
+    it('updates sync watermarks', () => {
+      tradeDb.saveAccount(mockAccount);
+      tradeDb.updateSyncedTo('0x123', 1704300000);
+      expect(tradeDb.getAccount('0x123')!.syncedTo).toBe(1704300000);
+    });
+
+    it('marks account as complete', () => {
+      tradeDb.saveAccount(mockAccount);
+      tradeDb.markComplete('0x123');
+      expect(tradeDb.getAccount('0x123')!.hasFullHistory).toBe(true);
+    });
+  });
 });
