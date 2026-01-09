@@ -200,4 +200,72 @@ dbCommand
     db.close();
   });
 
+dbCommand
+  .command('import')
+  .description('Import data from JSON cache files')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { importJsonCaches } = await import('./db/migrate.js');
+    const db = new TradeDB();
+
+    console.log(`Importing from ${opts.cacheDir}...`);
+    const result = importJsonCaches(db, opts.cacheDir);
+
+    console.log(`Imported ${result.trades} trades, ${result.accounts} accounts, ${result.redemptions} redemptions`);
+    if (result.errors.length > 0) {
+      console.log(`Errors: ${result.errors.length}`);
+      result.errors.forEach(e => console.log(`  - ${e}`));
+    }
+    db.close();
+  });
+
+dbCommand
+  .command('validate')
+  .description('Validate migration from JSON cache')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { validateMigration } = await import('./db/migrate.js');
+    const db = new TradeDB();
+
+    const result = validateMigration(db, opts.cacheDir);
+
+    console.log(`Trades:      ${result.dbCounts.trades} DB ${result.dbCounts.trades === result.jsonCounts.trades ? '==' : '!='} ${result.jsonCounts.trades} JSON`);
+    console.log(`Accounts:    ${result.dbCounts.accounts} DB ${result.dbCounts.accounts === result.jsonCounts.accounts ? '==' : '!='} ${result.jsonCounts.accounts} JSON`);
+    console.log(`Redemptions: ${result.dbCounts.redemptions} DB ${result.dbCounts.redemptions === result.jsonCounts.redemptions ? '==' : '!='} ${result.jsonCounts.redemptions} JSON`);
+    console.log(result.valid ? '\nValidation passed' : '\nValidation failed');
+    result.warnings.forEach(w => console.log(`  Warning: ${w}`));
+    db.close();
+    process.exit(result.valid ? 0 : 1);
+  });
+
+dbCommand
+  .command('cleanup-cache')
+  .description('Remove JSON cache after successful migration')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { validateMigration } = await import('./db/migrate.js');
+    const { rmSync, existsSync } = await import('fs');
+    const db = new TradeDB();
+
+    const result = validateMigration(db, opts.cacheDir);
+    if (!result.valid) {
+      console.error('Validation failed - cannot cleanup. Run "db validate" for details.');
+      db.close();
+      process.exit(1);
+    }
+
+    if (!existsSync(opts.cacheDir)) {
+      console.log('Cache directory does not exist - nothing to clean up.');
+      db.close();
+      return;
+    }
+
+    rmSync(opts.cacheDir, { recursive: true });
+    console.log(`Removed ${opts.cacheDir}`);
+    db.close();
+  });
+
 program.parse();

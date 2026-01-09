@@ -39,6 +39,9 @@ Last updated: 2026-01-08
 4. **`db`** - Database management commands
    - `db status` - Shows database statistics (file size, table row counts, backfill queue length)
    - `db wallet <address>` - Shows wallet info (creation date, sync window, trade count, backfill status)
+   - `db import [--cache-dir <path>]` - Imports trades, accounts, redemptions from JSON cache files (idempotent)
+   - `db validate [--cache-dir <path>]` - Validates migration by comparing DB and JSON counts
+   - `db cleanup-cache [--cache-dir <path>]` - Removes JSON cache directory (only after validation passes)
 
 ### Three Weighted Detection Signals
 
@@ -436,3 +439,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added `db status` CLI command: shows database file size, trade/account/redemption/market counts, backfill queue length |
 | 2026-01-08 | Added `db wallet <address>` CLI command: shows wallet creation date, sync window, trade count, backfill status |
 | 2026-01-08 | Added migration module (`src/db/migrate.ts`): `importJsonCaches()` imports trades/accounts/redemptions from `.cache/` JSON files, `validateMigration()` compares DB counts with JSON file counts; idempotent imports with 6-decimal scaling; 5 tests pass |
+| 2026-01-08 | Added `db import`, `db validate`, `db cleanup-cache` CLI commands for three-step migration workflow from JSON cache to SQLite |
