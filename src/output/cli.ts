@@ -238,6 +238,8 @@ export class CLIReporter {
         const reason = details.reason as string | undefined;
         if (reason === 'no_history') {
           lines.push(chalk.red(`    - NEW ACCOUNT - no trading history found`));
+        } else if (reason === 'skipped_budget') {
+          lines.push(chalk.yellow(`    - Account history not fetched (budget limit)`));
         } else {
           const totalTrades = details.totalTrades as number | undefined;
           const ageDays = details.accountAgeDays as number | undefined;
@@ -264,7 +266,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
 
           lines.push(chalk.gray(`    - Trade concentration: ${tradePct?.toFixed(1) || '?'}% of volume -> ${signal.score} pts`));
           lines.push(chalk.gray(`      (${this.formatUsd(tradeValue || 0)} trade / ${this.formatUsd(totalVolume || 0)} total)`));
@@ -468,7 +470,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
           detailStr = `trade=$${Math.round(tradeValue || 0).toLocaleString()} / ` +
             `total=$${Math.round(totalVolume || 0).toLocaleString()} = ${tradePct?.toFixed(1) || '?'}%`;
         }
