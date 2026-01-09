@@ -151,6 +151,8 @@ export class AnalyzeCommand {
         this.tradeDb.saveMarkets(dbMarkets);
 
         // Get raw fills (not pre-aggregated) for aggregation
+        // TODO: After DB compaction, revisit reading trades from DB first before fetching from subgraph.
+        // This would require tracking sync watermarks per market (similar to per-wallet in accounts table).
         const rawFills = await this.fetchRawFills(market, options);
 
         // Save trades to DB for future queries and point-in-time analysis
