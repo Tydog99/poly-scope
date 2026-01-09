@@ -423,3 +423,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Documented remaining point-in-time bugs in `docs/POINT_IN_TIME_BUG.md`: trade count, profit, and conviction concentration still use current state |
 | 2026-01-08 | Added `better-sqlite3` dependency (v12.5.0) and TypeScript types for SQLite database layer (Phase 1 of trade database implementation) |
 | 2026-01-08 | Added SQLite schema (`src/db/schema.ts`) with trades, accounts, redemptions, markets, backfill_queue tables; WAL mode enabled; 5 tests pass |
+| 2026-01-08 | Added TradeDB class (`src/db/index.ts`) with initialization and status methods; creates directories automatically; 3 tests pass |
