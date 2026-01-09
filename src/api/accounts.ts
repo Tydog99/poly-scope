@@ -1,9 +1,7 @@
 import type { AccountHistory } from '../signals/types.js';
 import type { SubgraphClient } from './subgraph.js';
-import type { SubgraphRedemption } from './types.js';
-import { AccountCache } from './account-cache.js';
-import { RedemptionCache } from './redemption-cache.js';
-import { TradeCountCache, type TradeCountData } from './trade-count-cache.js';
+import type { SubgraphRedemption, TradeCountData } from './types.js';
+import { TradeDB } from '../db/index.js';
 
 const DATA_API = 'https://data-api.polymarket.com';
 
@@ -16,29 +14,27 @@ interface DataApiTrade {
 
 export interface AccountFetcherOptions {
   subgraphClient?: SubgraphClient | null;
-  cacheAccountLookup?: boolean;
+  tradeDb?: TradeDB;
 }
 
 export class AccountFetcher {
   private subgraphClient: SubgraphClient | null;
-  private cache: AccountCache;
-  private redemptionCache: RedemptionCache;
-  private tradeCountCache: TradeCountCache;
-  private useCache: boolean;
+  private tradeDb: TradeDB | null;
 
   constructor(options: AccountFetcherOptions = {}) {
     this.subgraphClient = options.subgraphClient || null;
-    this.useCache = options.cacheAccountLookup || false;
-    this.cache = new AccountCache();
-    this.redemptionCache = new RedemptionCache();
-    this.tradeCountCache = new TradeCountCache();
+    this.tradeDb = options.tradeDb || null;
   }
 
   /**
-   * Check if history is already in cache
+   * Check if history is already in cache (TradeDB)
    */
   isCached(wallet: string): boolean {
-    return this.useCache && this.cache.has(wallet);
+    if (!this.tradeDb) return false;
+    const account = this.tradeDb.getAccount(wallet);
+    if (!account || !account.syncedAt) return false;
+    const staleMs = 60 * 60 * 1000; // 1 hour
+    return Date.now() - account.syncedAt * 1000 < staleMs;
   }
 
   /**
@@ -48,11 +44,24 @@ export class AccountFetcher {
     wallet: string,
     options: { skipNetwork?: boolean } = {}
   ): Promise<AccountHistory | null> {
-    // Check cache first if enabled
-    if (this.useCache) {
-      const cached = this.cache.load(wallet);
-      if (cached) {
-        return { ...cached, dataSource: 'cache' };
+    // Check SQLite DB first (if available)
+    if (this.tradeDb) {
+      const account = this.tradeDb.getAccount(wallet);
+      if (account && account.syncedAt) {
+        const staleMs = 60 * 60 * 1000; // 1 hour
+        const isFresh = Date.now() - account.syncedAt * 1000 < staleMs;
+        if (isFresh) {
+          return {
+            wallet: account.wallet,
+            totalTrades: account.tradeCountTotal ?? 0,
+            firstTradeDate: account.syncedFrom ? new Date(account.syncedFrom * 1000) : null,
+            lastTradeDate: account.syncedTo ? new Date(account.syncedTo * 1000) : null,
+            totalVolumeUsd: account.collateralVolume ? account.collateralVolume / 1e6 : 0,
+            creationDate: account.creationTimestamp ? new Date(account.creationTimestamp * 1000) : undefined,
+            profitUsd: account.profit ? account.profit / 1e6 : undefined,
+            dataSource: 'cache',
+          };
+        }
       }
     }
 
@@ -74,9 +83,20 @@ export class AccountFetcher {
       history = await this.getFromDataApi(wallet);
     }
 
-    // Save to cache if enabled
-    if (this.useCache) {
-      this.cache.save(history);
+    // Save to TradeDB for future cache hits
+    if (this.tradeDb && history) {
+      const now = Math.floor(Date.now() / 1000);
+      this.tradeDb.saveAccount({
+        wallet: history.wallet,
+        creationTimestamp: history.creationDate ? Math.floor(history.creationDate.getTime() / 1000) : null,
+        syncedFrom: history.firstTradeDate ? Math.floor(history.firstTradeDate.getTime() / 1000) : null,
+        syncedTo: history.lastTradeDate ? Math.floor(history.lastTradeDate.getTime() / 1000) : now,
+        syncedAt: now,
+        tradeCountTotal: history.totalTrades,
+        collateralVolume: Math.round(history.totalVolumeUsd * 1e6),
+        profit: history.profitUsd ? Math.round(history.profitUsd * 1e6) : null,
+        hasFullHistory: false,
+      });
     }
 
     return history;
@@ -88,27 +108,13 @@ export class AccountFetcher {
    */
   async getAccountHistoryBatch(wallets: string[]): Promise<Map<string, AccountHistory>> {
     const results = new Map<string, AccountHistory>();
-    const walletsToFetch: string[] = [];
-
-    // Check cache first
-    if (this.useCache) {
-      for (const wallet of wallets) {
-        const cached = this.cache.load(wallet);
-        if (cached) {
-          results.set(wallet.toLowerCase(), { ...cached, dataSource: 'cache' });
-        } else {
-          walletsToFetch.push(wallet);
-        }
-      }
-    } else {
-      walletsToFetch.push(...wallets);
-    }
+    const walletsToFetch = [...wallets];
 
     if (walletsToFetch.length === 0) {
       return results;
     }
 
-    // Fetch missing wallets
+    // Fetch wallets
     if (this.subgraphClient) {
       // Chunk wallets to avoid query complexity limits (100 per batch)
       const CHUNK_SIZE = 100;
@@ -127,28 +133,9 @@ export class AccountFetcher {
         lastSeenTimestamp: number;
       }> = [];
 
-      // Fetch redemptions for all wallets in batch (with caching)
-      let allRedemptions: Map<string, SubgraphRedemption[]>;
-      if (this.useCache) {
-        const { cached, uncached } = this.redemptionCache.loadBatch(walletsToFetch);
-        if (cached.size > 0) {
-          console.log(`    Loaded ${cached.size} cached redemptions, fetching ${uncached.length} remaining...`);
-        } else {
-          console.log(`    Fetching redemptions for ${walletsToFetch.length} wallets...`);
-        }
-        if (uncached.length > 0) {
-          const fetched = await this.subgraphClient.getRedemptionsBatch(uncached);
-          // Save fetched redemptions to cache
-          this.redemptionCache.saveBatch(fetched);
-          // Merge cached and fetched
-          allRedemptions = new Map([...cached, ...fetched]);
-        } else {
-          allRedemptions = cached;
-        }
-      } else {
-        console.log(`    Fetching redemptions for ${walletsToFetch.length} wallets...`);
-        allRedemptions = await this.subgraphClient.getRedemptionsBatch(walletsToFetch);
-      }
+      // Fetch redemptions for all wallets in batch
+      console.log(`    Fetching redemptions for ${walletsToFetch.length} wallets...`);
+      const allRedemptions = await this.subgraphClient.getRedemptionsBatch(walletsToFetch);
       console.log(`    Fetching account data...`);
 
       // Process chunks sequentially to avoid rate limiting
@@ -212,7 +199,6 @@ export class AccountFetcher {
                 dataSource: 'subgraph-estimated',
               };
               results.set(wallet.toLowerCase(), history);
-              if (this.useCache) this.cache.save(history);
               continue;
             }
 
@@ -240,86 +226,50 @@ export class AccountFetcher {
             dataSource: 'subgraph',
           };
           results.set(wallet.toLowerCase(), history);
-          if (this.useCache) this.cache.save(history);
         }
       }
 
-      // Query actual trade counts for broken accounts (with caching)
+      // Query actual trade counts for broken accounts
       if (brokenAccounts.length > 0) {
         const brokenWallets = brokenAccounts.map((a) => a.wallet);
+        console.log(`    Querying actual trade counts for ${brokenAccounts.length} broken Account entities...`);
 
-        // Check cache for existing trade counts
-        let tradeCounts: Map<string, TradeCountData>;
-        let walletsToQuery: string[];
+        try {
+          const tradeCounts = await this.subgraphClient.getTradeCountBatch(brokenWallets);
 
-        if (this.useCache) {
-          const { cached, uncached } = this.tradeCountCache.loadBatch(brokenWallets);
-          tradeCounts = cached;
-          walletsToQuery = uncached;
-          if (cached.size > 0) {
-            console.log(`    Loaded ${cached.size} cached trade counts, querying ${uncached.length} remaining...`);
-          } else {
-            console.log(`    Querying actual trade counts for ${brokenAccounts.length} broken Account entities...`);
+          // Process all broken accounts with trade counts
+          for (const broken of brokenAccounts) {
+            const tradeData = tradeCounts.get(broken.wallet.toLowerCase());
+            const actualCount = tradeData?.count ?? 0;
+            const totalProfit = broken.tradingProfit + broken.redemptionPayouts;
+
+            const history: AccountHistory = {
+              wallet: broken.wallet,
+              totalTrades: actualCount,
+              firstTradeDate: tradeData?.firstTimestamp
+                ? new Date(tradeData.firstTimestamp * 1000)
+                : new Date(broken.creationTimestamp * 1000),
+              lastTradeDate: tradeData?.lastTimestamp
+                ? new Date(tradeData.lastTimestamp * 1000)
+                : new Date(broken.lastSeenTimestamp * 1000),
+              totalVolumeUsd: broken.volume,
+              creationDate: new Date(broken.creationTimestamp * 1000),
+              profitUsd: totalProfit,
+              tradingProfitUsd: broken.tradingProfit,
+              redemptionPayoutsUsd: broken.redemptionPayouts,
+              dataSource: 'subgraph-trades',
+            };
+            results.set(broken.wallet.toLowerCase(), history);
           }
-        } else {
-          tradeCounts = new Map();
-          walletsToQuery = brokenWallets;
-          console.log(`    Querying actual trade counts for ${brokenAccounts.length} broken Account entities...`);
-        }
-
-        // Query uncached wallets
-        if (walletsToQuery.length > 0) {
-          try {
-            const fetchedCounts = await this.subgraphClient.getTradeCountBatch(
-              walletsToQuery,
-              // Callback to save after each batch for incremental caching
-              this.useCache
-                ? (batchResults) => this.tradeCountCache.saveBatch(batchResults)
-                : undefined
-            );
-            // Merge with cached
-            for (const [wallet, data] of fetchedCounts) {
-              tradeCounts.set(wallet, data);
-            }
-          } catch (error) {
-            const err = error as Error;
-            const cachedCount = tradeCounts.size;
-            console.log(`\n        ERROR: Trade count query failed after retries`);
-            console.log(`        Cached: ${cachedCount}/${brokenWallets.length} wallets`);
-            console.log(`        Remaining: ${walletsToQuery.length} wallets`);
-            console.log(`        Error: ${err.message.slice(0, 200)}${err.message.length > 200 ? '...' : ''}`);
-            console.log(`        Tip: Run again to resume from cache, or use --no-subgraph for Data API fallback\n`);
-            throw new Error(
-              `Subgraph indexers unavailable. Cached ${cachedCount}/${brokenWallets.length} trade counts. ` +
-              `${walletsToQuery.length} remaining. Run again to resume from cache.`
-            );
-          }
-        }
-
-        // Process all broken accounts with trade counts (cached + fetched)
-        for (const broken of brokenAccounts) {
-          const tradeData = tradeCounts.get(broken.wallet.toLowerCase());
-          const actualCount = tradeData?.count ?? 0;
-          const totalProfit = broken.tradingProfit + broken.redemptionPayouts;
-
-          const history: AccountHistory = {
-            wallet: broken.wallet,
-            totalTrades: actualCount,
-            firstTradeDate: tradeData?.firstTimestamp
-              ? new Date(tradeData.firstTimestamp * 1000)
-              : new Date(broken.creationTimestamp * 1000),
-            lastTradeDate: tradeData?.lastTimestamp
-              ? new Date(tradeData.lastTimestamp * 1000)
-              : new Date(broken.lastSeenTimestamp * 1000),
-            totalVolumeUsd: broken.volume,
-            creationDate: new Date(broken.creationTimestamp * 1000),
-            profitUsd: totalProfit,
-            tradingProfitUsd: broken.tradingProfit,
-            redemptionPayoutsUsd: broken.redemptionPayouts,
-            dataSource: 'subgraph-trades',
-          };
-          results.set(broken.wallet.toLowerCase(), history);
-          if (this.useCache) this.cache.save(history);
+        } catch (error) {
+          const err = error as Error;
+          console.log(`\n        ERROR: Trade count query failed after retries`);
+          console.log(`        Remaining: ${brokenWallets.length} wallets`);
+          console.log(`        Error: ${err.message.slice(0, 200)}${err.message.length > 200 ? '...' : ''}`);
+          console.log(`        Tip: Use --no-subgraph for Data API fallback\n`);
+          throw new Error(
+            `Subgraph indexers unavailable. ${brokenWallets.length} wallets remaining.`
+          );
         }
       }
 
@@ -330,7 +280,6 @@ export class AccountFetcher {
         for (const wallet of missing) {
           const history = await this.getFromDataApi(wallet);
           results.set(wallet.toLowerCase(), history);
-          if (this.useCache) this.cache.save(history);
         }
       }
     } else {
@@ -339,7 +288,6 @@ export class AccountFetcher {
       for (const wallet of walletsToFetch) {
         const history = await this.getFromDataApi(wallet);
         results.set(wallet.toLowerCase(), history);
-        if (this.useCache) this.cache.save(history);
       }
     }
 

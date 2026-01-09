@@ -2,11 +2,36 @@ import chalk from 'chalk';
 import { MonitorStream } from '../monitor/stream.js';
 import { MonitorEvaluator } from '../monitor/evaluator.js';
 import { AccountFetcher } from '../api/accounts.js';
-import { createSubgraphClient } from '../api/subgraph.js';
+import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
 import { SlugResolver } from '../api/slug.js';
 import { loadConfig } from '../config.js';
 import { formatMonitorBanner, formatMonitorTrade, formatMonitorAlert } from '../output/cli.js';
 import type { MonitorOptions } from '../monitor/types.js';
+import type { TradeDB } from '../db/index.js';
+
+/**
+ * Run opportunistic backfill during idle periods
+ * Drains up to 3 wallets from the queue when monitor is idle
+ */
+async function runIdleBackfill(
+  subgraphClient: SubgraphClient | null,
+  db: TradeDB | null
+): Promise<void> {
+  if (!subgraphClient || !db) return;
+
+  try {
+    const queue = db.getBackfillQueue(3);
+    if (queue.length === 0) return;
+
+    const { runBackfill } = await import('../db/backfill.js');
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    console.log(chalk.dim(`[${time}] Idle - backfilling ${queue.length} wallet(s)...`));
+
+    await runBackfill(db, subgraphClient, { maxWallets: 3, maxTimeMs: 10000 });
+  } catch (e) {
+    // Don't interrupt monitoring if backfill fails
+  }
+}
 
 /**
  * Execute the monitor command
@@ -51,7 +76,6 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
 
   const accountFetcher = new AccountFetcher({
     subgraphClient,
-    cacheAccountLookup: config.subgraph.cacheAccountLookup,
   });
 
   const evaluator = new MonitorEvaluator({
@@ -75,6 +99,31 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
   // Market slug to question map for alerts
   const marketQuestions = new Map(resolvedMarkets.map(m => [m.slug, m.question]));
 
+  // Idle backfill timer - triggers after 30s with no trades
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let db: TradeDB | null = null;
+  const IDLE_BACKFILL_DELAY_MS = 30000; // 30 seconds
+
+  const resetIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(async () => {
+      await runIdleBackfill(subgraphClient, db);
+    }, IDLE_BACKFILL_DELAY_MS);
+  };
+
+  // Initialize database for idle backfill
+  try {
+    const { TradeDB } = await import('../db/index.js');
+    db = new TradeDB();
+  } catch (e) {
+    // DB not available, skip idle backfill
+    if (options.verbose) {
+      console.log(chalk.dim('Database not available, skipping idle backfill'));
+    }
+  }
+
   // Display startup banner
   console.log(formatMonitorBanner(
     resolvedMarkets.map(m => m.slug),
@@ -91,6 +140,8 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
     console.log();
     console.log('Monitoring... (Ctrl+C to stop)');
     console.log();
+    // Start idle timer on connection
+    resetIdleTimer();
   });
 
   stream.on('disconnected', () => {
@@ -114,6 +165,9 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
   });
 
   stream.on('trade', async (event) => {
+    // Reset idle timer on each trade
+    resetIdleTimer();
+
     // Quick filter by size
     if (!evaluator.shouldEvaluate(event)) {
       return;
@@ -155,6 +209,14 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
   process.on('SIGINT', () => {
     console.log();
     console.log(chalk.dim('Stopping monitor...'));
+    // Clean up idle timer
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    // Close database
+    if (db) {
+      db.close();
+    }
     stream.stop();
     process.exit(0);
   });

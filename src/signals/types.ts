@@ -23,6 +23,13 @@ export interface SignalContext {
   config: import('../config.js').Config;
   accountHistory?: AccountHistory;
   marketPrices?: PricePoint[];
+  // Point-in-time historical state (optional, from DB)
+  historicalState?: {
+    tradeCount: number;
+    volume: number;
+    pnl: number;
+    approximate: boolean;
+  };
 }
 
 // Re-export AggregatedTrade as Trade for backward compatibility during migration

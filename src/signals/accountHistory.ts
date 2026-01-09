@@ -6,7 +6,7 @@ export class AccountHistorySignal implements Signal {
   weight = 35;
 
   async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
-    const { config, accountHistory } = context;
+    const { config, accountHistory, historicalState } = context;
     const { maxLifetimeTrades, maxAccountAgeDays, minDormancyDays } = config.accountHistory;
 
     // If account history was skipped due to budget, return neutral score (50)
@@ -30,12 +30,16 @@ export class AccountHistorySignal implements Signal {
       };
     }
 
-    const now = new Date();
+    // Use historical state if available (point-in-time analysis), otherwise fall back to current
+    const tradeCount = historicalState?.tradeCount ?? accountHistory.totalTrades;
+    const usingHistoricalTradeCount = historicalState?.tradeCount !== undefined;
 
     // Use creationDate from subgraph if available, otherwise fall back to firstTradeDate
     const accountCreationDate = accountHistory.creationDate || accountHistory.firstTradeDate;
+    // Calculate account age relative to the trade timestamp, not current date
+    // This ensures historical analysis correctly measures how old the account was at trade time
     const accountAgeDays = Math.floor(
-      (now.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
+      (trade.timestamp.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     const dormancyDays = accountHistory.lastTradeDate
@@ -57,7 +61,7 @@ export class AccountHistorySignal implements Signal {
 
     if (hasProfit) {
       // 4-component scoring (each 0-25 max)
-      tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades, 25);
+      tradeCountScore = this.scoreTradeCount(tradeCount, maxLifetimeTrades, 25);
       ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 25);
       dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 25);
       profitScore = this.scoreProfitOnNewAccount(
@@ -67,7 +71,7 @@ export class AccountHistorySignal implements Signal {
       );
     } else {
       // 3-component scoring for backward compatibility
-      tradeCountScore = this.scoreTradeCount(accountHistory.totalTrades, maxLifetimeTrades, 33);
+      tradeCountScore = this.scoreTradeCount(tradeCount, maxLifetimeTrades, 33);
       ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 33);
       dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 34);
 
@@ -87,7 +91,7 @@ export class AccountHistorySignal implements Signal {
     const totalScore = Math.round(tradeCountScore + ageScore + dormancyScore + profitScore);
 
     const details: Record<string, unknown> = {
-      totalTrades: accountHistory.totalTrades,
+      totalTrades: tradeCount,
       accountAgeDays,
       dormancyDays,
       tradeCountScore: Math.round(tradeCountScore),
@@ -95,6 +99,11 @@ export class AccountHistorySignal implements Signal {
       dormancyScore: Math.round(dormancyScore),
       dataSource: accountHistory.dataSource || 'data-api',
     };
+
+    // Indicate when historical trade count was used
+    if (usingHistoricalTradeCount) {
+      details.historicalTradeCount = true;
+    }
 
     if (hasProfit) {
       details.profitUsd = accountHistory.profitUsd;

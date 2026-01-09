@@ -40,7 +40,6 @@ program
     if (opts.minSize) config.tradeSize.minAbsoluteUsd = opts.minSize;
     if (opts.threshold) config.alertThreshold = opts.threshold;
     if (opts.subgraph === false) config.subgraph.enabled = false;
-    if (opts.cache === false) config.subgraph.cacheAccountLookup = false;
 
     const command = new AnalyzeCommand(config);
     const reporter = new CLIReporter({ debug: opts.debug });
@@ -153,6 +152,180 @@ program
       retryDelaySeconds: options.retryDelay,
       verbose: options.verbose,
     });
+  });
+
+// DB management commands
+const dbCommand = program.command('db').description('Database management commands');
+
+dbCommand
+  .command('status')
+  .description('Show database statistics')
+  .action(async () => {
+    const { TradeDB } = await import('./db/index.js');
+    const db = new TradeDB();
+    const status = db.getStatus();
+    const { statSync } = await import('fs');
+    const sizeMB = (statSync(status.path).size / 1024 / 1024).toFixed(2);
+
+    console.log(`Database: ${status.path} (${sizeMB} MB)`);
+    console.log(`Trades: ${status.trades.toLocaleString()}`);
+    console.log(`Accounts: ${status.accounts.toLocaleString()}`);
+    console.log(`Redemptions: ${status.redemptions.toLocaleString()}`);
+    console.log(`Markets: ${status.markets.toLocaleString()}`);
+    console.log(`Backfill queue: ${status.backfillQueue}`);
+    db.close();
+  });
+
+dbCommand
+  .command('wallet <address>')
+  .description('Show database info for a wallet')
+  .action(async (address: string) => {
+    const { TradeDB } = await import('./db/index.js');
+    const db = new TradeDB();
+    const account = db.getAccount(address);
+
+    if (!account) {
+      console.log(`Wallet ${address} not found in database`);
+      db.close();
+      return;
+    }
+
+    console.log(`Wallet: ${account.wallet}`);
+    console.log(`Created: ${account.creationTimestamp ? new Date(account.creationTimestamp * 1000).toISOString() : 'unknown'}`);
+    console.log(`Synced: ${account.syncedFrom ? new Date(account.syncedFrom * 1000).toISOString() : 'never'} to ${account.syncedTo ? new Date(account.syncedTo * 1000).toISOString() : 'never'}`);
+    console.log(`Trades in DB: ${db.getTradesForWallet(address).length}`);
+    console.log(`Complete: ${account.hasFullHistory ? 'Yes' : 'No'}`);
+    if (db.hasQueuedBackfill(address)) console.log(`Backfill: Queued`);
+    db.close();
+  });
+
+dbCommand
+  .command('import')
+  .description('Import data from JSON cache files')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { importJsonCaches } = await import('./db/migrate.js');
+    const db = new TradeDB();
+
+    console.log(`Importing from ${opts.cacheDir}...`);
+    const result = importJsonCaches(db, opts.cacheDir);
+
+    console.log(`Imported ${result.trades} trades, ${result.accounts} accounts, ${result.redemptions} redemptions`);
+    if (result.errors.length > 0) {
+      console.log(`Errors: ${result.errors.length}`);
+      result.errors.forEach(e => console.log(`  - ${e}`));
+    }
+    db.close();
+  });
+
+dbCommand
+  .command('validate')
+  .description('Validate migration from JSON cache')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { validateMigration } = await import('./db/migrate.js');
+    const db = new TradeDB();
+
+    const result = validateMigration(db, opts.cacheDir);
+
+    console.log(`Trades:      ${result.dbCounts.trades} DB ${result.dbCounts.trades === result.jsonCounts.trades ? '==' : '!='} ${result.jsonCounts.trades} JSON`);
+    console.log(`Accounts:    ${result.dbCounts.accounts} DB ${result.dbCounts.accounts === result.jsonCounts.accounts ? '==' : '!='} ${result.jsonCounts.accounts} JSON`);
+    console.log(`Redemptions: ${result.dbCounts.redemptions} DB ${result.dbCounts.redemptions === result.jsonCounts.redemptions ? '==' : '!='} ${result.jsonCounts.redemptions} JSON`);
+    console.log(result.valid ? '\nValidation passed' : '\nValidation failed');
+    result.warnings.forEach(w => console.log(`  Warning: ${w}`));
+    db.close();
+    process.exit(result.valid ? 0 : 1);
+  });
+
+dbCommand
+  .command('cleanup-cache')
+  .description('Remove JSON cache after successful migration')
+  .option('--cache-dir <path>', 'Cache directory', '.cache')
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { validateMigration } = await import('./db/migrate.js');
+    const { rmSync, existsSync } = await import('fs');
+    const db = new TradeDB();
+
+    const result = validateMigration(db, opts.cacheDir);
+    if (!result.valid) {
+      console.error('Validation failed - cannot cleanup. Run "db validate" for details.');
+      db.close();
+      process.exit(1);
+    }
+
+    if (!existsSync(opts.cacheDir)) {
+      console.log('Cache directory does not exist - nothing to clean up.');
+      db.close();
+      return;
+    }
+
+    rmSync(opts.cacheDir, { recursive: true });
+    console.log(`Removed ${opts.cacheDir}`);
+    db.close();
+  });
+
+dbCommand
+  .command('queue')
+  .description('Show pending backfill queue')
+  .option('--limit <n>', 'Maximum entries to show', parseInt)
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const db = new TradeDB();
+    const queue = db.getBackfillQueue(opts.limit);
+
+    if (queue.length === 0) {
+      console.log('Backfill queue is empty');
+      db.close();
+      return;
+    }
+
+    console.log(`Backfill queue (${queue.length} pending):\n`);
+    console.log('Priority  Wallet                                      Queued');
+    console.log('--------  ------------------------------------------  -------------------');
+
+    for (const item of queue) {
+      const queuedAt = item.createdAt
+        ? new Date(item.createdAt * 1000).toISOString().replace('T', ' ').slice(0, 19)
+        : 'unknown';
+      console.log(`${String(item.priority).padStart(8)}  ${item.wallet}  ${queuedAt}`);
+    }
+
+    db.close();
+  });
+
+dbCommand
+  .command('backfill [wallet]')
+  .description('Backfill trade history for queued wallets or a specific wallet')
+  .option('--max <n>', 'Maximum wallets to process', parseInt)
+  .action(async (wallet: string | undefined, opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { createSubgraphClient } = await import('./api/subgraph.js');
+    const { runBackfill, backfillWallet } = await import('./db/backfill.js');
+
+    const db = new TradeDB();
+    const subgraph = createSubgraphClient();
+
+    if (!subgraph) {
+      console.error('Error: THE_GRAPH_API_KEY environment variable is required');
+      db.close();
+      process.exit(1);
+    }
+
+    if (wallet) {
+      console.log(`Backfilling ${wallet}...`);
+      await backfillWallet(db, subgraph, wallet);
+      console.log('Done');
+    } else {
+      const queueSize = db.getBackfillQueue().length;
+      console.log(`Processing ${Math.min(opts.max ?? 10, queueSize)} of ${queueSize} queued wallets...`);
+      const processed = await runBackfill(db, subgraph, { maxWallets: opts.max });
+      console.log(`Processed ${processed} wallets`);
+    }
+
+    db.close();
   });
 
 program.parse();

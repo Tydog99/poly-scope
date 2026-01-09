@@ -85,6 +85,25 @@ export class InvestigateCommand {
     const { wallet, tradeLimit = 500, resolveMarkets = true, market } = options;
     const normalizedWallet = wallet.toLowerCase();
 
+    // Blocking backfill for target wallet - ensure we have full history
+    try {
+      const { TradeDB } = await import('../db/index.js');
+      const { backfillWallet } = await import('../db/backfill.js');
+
+      const db = new TradeDB();
+      const account = db.getAccount(normalizedWallet);
+
+      // Only backfill if we don't have full history
+      if (!account?.hasFullHistory && this.subgraphClient) {
+        console.log(`Fetching complete trade history for ${normalizedWallet.slice(0, 8)}...`);
+        await backfillWallet(db, this.subgraphClient, normalizedWallet);
+      }
+      db.close();
+    } catch (e) {
+      console.warn('Could not complete backfill:', (e as Error).message);
+      // Continue with analysis even if backfill fails
+    }
+
     // If market filter specified, get its token IDs and condition ID
     let marketTokenIds: Set<string> | null = null;
     let marketConditionId: string | null = null;
