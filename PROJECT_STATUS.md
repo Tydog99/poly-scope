@@ -442,3 +442,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added `db import`, `db validate`, `db cleanup-cache` CLI commands for three-step migration workflow from JSON cache to SQLite |
 | 2026-01-08 | Added DBAccountFetcher (`src/api/db-accounts.ts`): helper class for database-aware account fetching - retrieves cached accounts from DB, converts DB format to AccountHistory format, detects stale data (default 1hr TTL), saves subgraph data to DB cache; 11 tests pass |
 | 2026-01-08 | Integrated TradeDB into AccountFetcher (`src/api/accounts.ts`): optional `tradeDb` option, checks DB first with 1-hour freshness window, saves fetched data back to DB; backward compatible - existing code without tradeDb works unchanged; 272 tests pass |
+| 2026-01-08 | Added `historicalState` field to SignalContext (`src/signals/types.ts`): optional point-in-time state (tradeCount, volume, pnl, approximate) from database for accurate historical analysis; Phase 4 of trade database implementation |
