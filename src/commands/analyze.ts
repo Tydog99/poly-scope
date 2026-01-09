@@ -153,6 +153,50 @@ export class AnalyzeCommand {
         // Get raw fills (not pre-aggregated) for aggregation
         const rawFills = await this.fetchRawFills(market, options);
 
+        // Save trades to DB for future queries and point-in-time analysis
+        if (rawFills.length > 0) {
+          const dbTrades: import('../db/index.js').DBTrade[] = [];
+          for (const fill of rawFills) {
+            const sizeNum = parseInt(fill.size);
+            const priceNum = parseInt(fill.price);
+            const valueUsd = Math.round((sizeNum * priceNum) / 1e6); // size * price, both 6 decimals
+
+            // Store maker's perspective
+            dbTrades.push({
+              id: `${fill.id}-maker`,
+              txHash: fill.transactionHash,
+              wallet: fill.maker.toLowerCase(),
+              marketId: fill.marketId,
+              timestamp: fill.timestamp,
+              side: fill.side,
+              action: fill.side === 'Buy' ? 'BUY' : 'SELL', // Maker's action matches side
+              role: 'maker',
+              size: sizeNum,
+              price: priceNum,
+              valueUsd,
+            });
+
+            // Store taker's perspective
+            dbTrades.push({
+              id: `${fill.id}-taker`,
+              txHash: fill.transactionHash,
+              wallet: fill.taker.toLowerCase(),
+              marketId: fill.marketId,
+              timestamp: fill.timestamp,
+              side: fill.side,
+              action: fill.side === 'Buy' ? 'SELL' : 'BUY', // Taker's action is opposite of side
+              role: 'taker',
+              size: sizeNum,
+              price: priceNum,
+              valueUsd,
+            });
+          }
+          const saved = this.tradeDb.saveTrades(dbTrades);
+          if (saved > 0) {
+            console.log(`  Saved ${saved} trade records to DB`);
+          }
+        }
+
         if (rawFills.length > 0) {
           // Aggregate fills per wallet to handle:
           // 1. Multiple fills in same tx -> one aggregated trade
