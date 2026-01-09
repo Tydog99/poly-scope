@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 261 tests passing across 24 test files
+- **Test Status**: All 272 tests passing across 25 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -440,3 +440,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added `db wallet <address>` CLI command: shows wallet creation date, sync window, trade count, backfill status |
 | 2026-01-08 | Added migration module (`src/db/migrate.ts`): `importJsonCaches()` imports trades/accounts/redemptions from `.cache/` JSON files, `validateMigration()` compares DB counts with JSON file counts; idempotent imports with 6-decimal scaling; 5 tests pass |
 | 2026-01-08 | Added `db import`, `db validate`, `db cleanup-cache` CLI commands for three-step migration workflow from JSON cache to SQLite |
+| 2026-01-08 | Added DBAccountFetcher (`src/api/db-accounts.ts`): helper class for database-aware account fetching - retrieves cached accounts from DB, converts DB format to AccountHistory format, detects stale data (default 1hr TTL), saves subgraph data to DB cache; 11 tests pass |
