@@ -424,3 +424,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added `better-sqlite3` dependency (v12.5.0) and TypeScript types for SQLite database layer (Phase 1 of trade database implementation) |
 | 2026-01-08 | Added SQLite schema (`src/db/schema.ts`) with trades, accounts, redemptions, markets, backfill_queue tables; WAL mode enabled; 5 tests pass |
 | 2026-01-08 | Added TradeDB class (`src/db/index.ts`) with initialization and status methods; creates directories automatically; 3 tests pass |
+| 2026-01-08 | Added trade CRUD operations: `saveTrades()` with idempotent INSERT OR IGNORE, `getTradesForWallet()` with optional timestamp filter, `getTradesForMarket()`; 9 tests pass |
