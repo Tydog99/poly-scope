@@ -10,7 +10,7 @@ Last updated: 2026-01-08
 - **Test Status**: All 226 tests passing across 22 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
-### Implemented Commands (3)
+### Implemented Commands (4)
 
 1. **`analyze`** - Market forensic analysis
    - Analyzes trades for a specific market (by slug or condition ID)
@@ -35,6 +35,10 @@ Last updated: 2026-01-08
    - Auto-reconnects with exponential backoff
    - Color-coded output: YES (blue), NO (yellow)
    - Uses 5-minute in-memory cache for account lookups
+
+4. **`db`** - Database management commands
+   - `db status` - Shows database statistics (file size, table row counts, backfill queue length)
+   - `db wallet <address>` - Shows wallet info (creation date, sync window, trade count, backfill status)
 
 ### Three Weighted Detection Signals
 
@@ -429,3 +433,5 @@ docs/ (Planning documents)
 | 2026-01-08 | Added point-in-time query: `getAccountStateAt(wallet, timestamp)` returns trade count, volume, P&L at any historical moment; marks results as approximate when data incomplete; 23 tests pass |
 | 2026-01-08 | Added redemption operations: `saveRedemptions()` with INSERT OR IGNORE, `getRedemptionsForWallet()` for P&L calculations; 30 tests pass |
 | 2026-01-08 | Added backfill queue operations: `queueBackfill()`, `getBackfillQueue()` ordered by priority DESC, `markBackfillStarted()`, `markBackfillComplete()`, `hasQueuedBackfill()`; 30 tests pass |
+| 2026-01-08 | Added `db status` CLI command: shows database file size, trade/account/redemption/market counts, backfill queue length |
+| 2026-01-08 | Added `db wallet <address>` CLI command: shows wallet creation date, sync window, trade count, backfill status |
