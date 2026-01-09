@@ -490,9 +490,10 @@ export class AnalyzeCommand {
     const dbTrades: DBTrade[] = [];
 
     for (const fill of fills) {
-      const sizeNum = parseInt(fill.size);
-      const priceNum = parseInt(fill.price);
-      const valueUsd = Math.round((sizeNum * priceNum) / 1e6); // size * price, both 6 decimals
+      const sizeNum = parseInt(fill.size); // USD value in 6 decimals
+      const priceRaw = parseFloat(fill.price); // 0-1 decimal (e.g., 0.22)
+      const priceNum = Math.round(priceRaw * 1e6); // Convert to 6 decimal integer
+      const valueUsd = sizeNum; // In subgraph, size IS the USD value
 
       // Store maker's perspective
       dbTrades.push({
