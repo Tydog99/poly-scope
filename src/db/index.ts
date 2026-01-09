@@ -38,6 +38,13 @@ export interface DBAccount {
   hasFullHistory: boolean;
 }
 
+export interface PointInTimeState {
+  tradeCount: number;
+  volume: number;
+  pnl: number;
+  approximate: boolean;
+}
+
 export class TradeDB {
   private db: Database.Database;
   private dbPath: string;
@@ -169,5 +176,20 @@ export class TradeDB {
   markComplete(wallet: string): void {
     this.db.prepare(`UPDATE accounts SET has_full_history = 1 WHERE wallet = ?`)
       .run(wallet.toLowerCase());
+  }
+
+  getAccountStateAt(wallet: string, atTimestamp: number): PointInTimeState {
+    const account = this.getAccount(wallet);
+    const approximate = !account || !account.hasFullHistory ||
+      (account.syncedFrom !== null && account.syncedFrom > atTimestamp);
+
+    const result = this.db.prepare(`
+      SELECT COUNT(*) as tradeCount, COALESCE(SUM(value_usd), 0) as volume,
+        COALESCE(SUM(CASE WHEN action = 'SELL' THEN value_usd ELSE 0 END) -
+                 SUM(CASE WHEN action = 'BUY' THEN value_usd ELSE 0 END), 0) as pnl
+      FROM trades WHERE wallet = ? AND timestamp < ?
+    `).get(wallet.toLowerCase(), atTimestamp) as { tradeCount: number; volume: number; pnl: number };
+
+    return { ...result, approximate };
   }
 }

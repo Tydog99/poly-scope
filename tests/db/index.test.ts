@@ -170,4 +170,59 @@ describe('TradeDB', () => {
       expect(tradeDb.getAccount('0x123')!.hasFullHistory).toBe(true);
     });
   });
+
+  describe('point-in-time queries', () => {
+    beforeEach(() => {
+      tradeDb.saveTrades([
+        { id: 'fill-1', txHash: '0xa', wallet: '0x123', marketId: 't1', timestamp: 1000,
+          side: 'Buy', action: 'BUY', role: 'taker', size: 100000000, price: 500000, valueUsd: 50000000 },
+        { id: 'fill-2', txHash: '0xb', wallet: '0x123', marketId: 't1', timestamp: 2000,
+          side: 'Sell', action: 'SELL', role: 'taker', size: 100000000, price: 600000, valueUsd: 60000000 },
+        { id: 'fill-3', txHash: '0xc', wallet: '0x123', marketId: 't2', timestamp: 3000,
+          side: 'Buy', action: 'BUY', role: 'taker', size: 200000000, price: 400000, valueUsd: 80000000 },
+      ]);
+      tradeDb.saveAccount({
+        wallet: '0x123', creationTimestamp: 500, syncedFrom: 1000, syncedTo: 3000,
+        syncedAt: Date.now(), tradeCountTotal: 3, collateralVolume: 190000000,
+        profit: 10000000, hasFullHistory: true,
+      });
+    });
+
+    it('returns trade count at a point in time', () => {
+      expect(tradeDb.getAccountStateAt('0x123', 1500).tradeCount).toBe(1);
+    });
+
+    it('returns volume at a point in time', () => {
+      expect(tradeDb.getAccountStateAt('0x123', 2500).volume).toBe(110000000);
+    });
+
+    it('returns all trades when timestamp is after last trade', () => {
+      const state = tradeDb.getAccountStateAt('0x123', 5000);
+      expect(state.tradeCount).toBe(3);
+      expect(state.volume).toBe(190000000);
+    });
+
+    it('returns zero when timestamp is before first trade', () => {
+      const state = tradeDb.getAccountStateAt('0x123', 500);
+      expect(state.tradeCount).toBe(0);
+      expect(state.volume).toBe(0);
+    });
+
+    it('calculates P&L (sells - buys)', () => {
+      expect(tradeDb.getAccountStateAt('0x123', 2500).pnl).toBe(10000000);
+    });
+
+    it('marks as approximate when data is incomplete', () => {
+      tradeDb.saveAccount({
+        wallet: '0x456', creationTimestamp: 500, syncedFrom: 2000, syncedTo: 3000,
+        syncedAt: Date.now(), tradeCountTotal: 10, collateralVolume: 100000000,
+        profit: 0, hasFullHistory: false,
+      });
+      expect(tradeDb.getAccountStateAt('0x456', 1500).approximate).toBe(true);
+    });
+
+    it('marks as not approximate when data covers the time', () => {
+      expect(tradeDb.getAccountStateAt('0x123', 2500).approximate).toBe(false);
+    });
+  });
 });

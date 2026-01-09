@@ -426,3 +426,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added TradeDB class (`src/db/index.ts`) with initialization and status methods; creates directories automatically; 3 tests pass |
 | 2026-01-08 | Added trade CRUD operations: `saveTrades()` with idempotent INSERT OR IGNORE, `getTradesForWallet()` with optional timestamp filter, `getTradesForMarket()`; 9 tests pass |
 | 2026-01-08 | Added account CRUD operations: `saveAccount()` with INSERT OR REPLACE, `getAccount()`, `updateSyncedTo()`, `markComplete()`; sync watermarks for point-in-time queries; 16 tests pass |
+| 2026-01-08 | Added point-in-time query: `getAccountStateAt(wallet, timestamp)` returns trade count, volume, P&L at any historical moment; marks results as approximate when data incomplete; 23 tests pass |
