@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 277 tests passing across 25 test files
+- **Test Status**: All 286 tests passing across 26 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -445,3 +445,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added `historicalState` field to SignalContext (`src/signals/types.ts`): optional point-in-time state (tradeCount, volume, pnl, approximate) from database for accurate historical analysis; Phase 4 of trade database implementation |
 | 2026-01-08 | Updated AccountHistorySignal to use `historicalState.tradeCount` when available: falls back to `accountHistory.totalTrades` for backward compatibility; reports `historicalTradeCount: true` in details when using point-in-time data; 3 new tests added (275 total); Task 4.2 complete |
 | 2026-01-08 | Updated ConvictionSignal to use `historicalState.volume` when available: converts from 6-decimal scaled integer to USD; falls back to `accountHistory.totalVolumeUsd` for backward compatibility; reports `usingHistoricalState: true` in details; 2 new tests added (277 total); Task 4.3 complete |
+| 2026-01-08 | Added backfill runner (`src/db/backfill.ts`): `runBackfill()` processes queued wallets in priority order with configurable limits, `backfillWallet()` fetches all historical trades from subgraph with pagination and saves to DB, graceful error handling (doesn't mark complete on failure); 9 tests added (286 total); Task 5.1 complete |
