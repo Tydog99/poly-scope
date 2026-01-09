@@ -316,7 +316,7 @@ export class AnalyzeCommand {
     // 5. Sort by score descending
     scoredTrades.sort((a, b) => b.score.total - a.score.total);
 
-    return {
+    const report: AnalysisReport = {
       market,
       totalTrades: allTrades.length,
       analyzedTrades: tradesToAnalyze.length,
@@ -328,6 +328,26 @@ export class AnalyzeCommand {
       targetWallet: options.wallet,
       targetAccountHistory: options.wallet ? targetAccountHistory : undefined,
     };
+
+    // Opportunistic backfill after analysis
+    try {
+      const { TradeDB } = await import('../db/index.js');
+      const { runBackfill } = await import('../db/backfill.js');
+
+      const db = new TradeDB();
+      const queue = db.getBackfillQueue();
+
+      if (queue.length > 0 && this.subgraphClient) {
+        console.log(`\nBackfilling ${Math.min(5, queue.length)} wallets from queue...`);
+        await runBackfill(db, this.subgraphClient, { maxWallets: 5 });
+      }
+      db.close();
+    } catch (e) {
+      // Don't fail analysis if backfill fails
+      console.error('Backfill error:', (e as Error).message);
+    }
+
+    return report;
   }
 
   /**
