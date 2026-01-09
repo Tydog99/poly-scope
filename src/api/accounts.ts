@@ -4,6 +4,7 @@ import type { SubgraphRedemption } from './types.js';
 import { AccountCache } from './account-cache.js';
 import { RedemptionCache } from './redemption-cache.js';
 import { TradeCountCache, type TradeCountData } from './trade-count-cache.js';
+import { TradeDB } from '../db/index.js';
 
 const DATA_API = 'https://data-api.polymarket.com';
 
@@ -17,6 +18,7 @@ interface DataApiTrade {
 export interface AccountFetcherOptions {
   subgraphClient?: SubgraphClient | null;
   cacheAccountLookup?: boolean;
+  tradeDb?: TradeDB;
 }
 
 export class AccountFetcher {
@@ -25,6 +27,7 @@ export class AccountFetcher {
   private redemptionCache: RedemptionCache;
   private tradeCountCache: TradeCountCache;
   private useCache: boolean;
+  private tradeDb: TradeDB | null;
 
   constructor(options: AccountFetcherOptions = {}) {
     this.subgraphClient = options.subgraphClient || null;
@@ -32,6 +35,7 @@ export class AccountFetcher {
     this.cache = new AccountCache();
     this.redemptionCache = new RedemptionCache();
     this.tradeCountCache = new TradeCountCache();
+    this.tradeDb = options.tradeDb || null;
   }
 
   /**
@@ -48,7 +52,28 @@ export class AccountFetcher {
     wallet: string,
     options: { skipNetwork?: boolean } = {}
   ): Promise<AccountHistory | null> {
-    // Check cache first if enabled
+    // Check SQLite DB first (if available)
+    if (this.tradeDb) {
+      const account = this.tradeDb.getAccount(wallet);
+      if (account && account.syncedAt) {
+        const staleMs = 60 * 60 * 1000; // 1 hour
+        const isFresh = Date.now() - account.syncedAt * 1000 < staleMs;
+        if (isFresh) {
+          return {
+            wallet: account.wallet,
+            totalTrades: account.tradeCountTotal ?? 0,
+            firstTradeDate: account.syncedFrom ? new Date(account.syncedFrom * 1000) : null,
+            lastTradeDate: account.syncedTo ? new Date(account.syncedTo * 1000) : null,
+            totalVolumeUsd: account.collateralVolume ? account.collateralVolume / 1e6 : 0,
+            creationDate: account.creationTimestamp ? new Date(account.creationTimestamp * 1000) : undefined,
+            profitUsd: account.profit ? account.profit / 1e6 : undefined,
+            dataSource: 'cache',
+          };
+        }
+      }
+    }
+
+    // Check memory cache if enabled
     if (this.useCache) {
       const cached = this.cache.load(wallet);
       if (cached) {
@@ -74,9 +99,25 @@ export class AccountFetcher {
       history = await this.getFromDataApi(wallet);
     }
 
-    // Save to cache if enabled
+    // Save to memory cache if enabled
     if (this.useCache) {
       this.cache.save(history);
+    }
+
+    // Save to TradeDB for future cache hits
+    if (this.tradeDb && history) {
+      const now = Math.floor(Date.now() / 1000);
+      this.tradeDb.saveAccount({
+        wallet: history.wallet,
+        creationTimestamp: history.creationDate ? Math.floor(history.creationDate.getTime() / 1000) : null,
+        syncedFrom: history.firstTradeDate ? Math.floor(history.firstTradeDate.getTime() / 1000) : null,
+        syncedTo: history.lastTradeDate ? Math.floor(history.lastTradeDate.getTime() / 1000) : now,
+        syncedAt: now,
+        tradeCountTotal: history.totalTrades,
+        collateralVolume: Math.round(history.totalVolumeUsd * 1e6),
+        profit: history.profitUsd ? Math.round(history.profitUsd * 1e6) : null,
+        hasFullHistory: false,
+      });
     }
 
     return history;
