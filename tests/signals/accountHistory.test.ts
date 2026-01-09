@@ -346,7 +346,91 @@ describe('AccountHistorySignal', () => {
       const result = await signal.calculate(makeTrade(), makeContext(history));
       expect(result.details.profitScore).toBe(0);
     });
+  });
 
+  describe('point-in-time scoring', () => {
+    it('uses historical trade count when available', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 500, // Current count is high
+        totalVolumeUsd: 100000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date('2023-01-01'),
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 1, // But at trade time, they only had 1 trade!
+          volume: 1000,
+          pnl: 0,
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should score based on 1 trade (historical), not 500 (current)
+      expect(result.details.tradeCountScore).toBeGreaterThan(20);
+    });
+
+    it('falls back to current trade count when historicalState is not available', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 500, // Established trader
+        totalVolumeUsd: 100000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date('2023-01-01'),
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        // No historicalState
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should score based on 500 trades (current) - zero score for established trader
+      expect(result.details.tradeCountScore).toBe(0);
+    });
+
+    it('reports historical trade count in details when available', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 500,
+        totalVolumeUsd: 100000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date('2023-01-01'),
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 5,
+          volume: 5000,
+          pnl: 100,
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should report the historical trade count used for scoring
+      expect(result.details.totalTrades).toBe(5);
+      expect(result.details.historicalTradeCount).toBe(true);
+    });
+  });
+
+  describe('with subgraph data - Venezuela case', () => {
     it('returns high score for Venezuela insider case profile', async () => {
       // Based on actual case: 0x31a56e9e690c621ed21de08cb559e9524cdb8ed9
       const history: AccountHistory = {

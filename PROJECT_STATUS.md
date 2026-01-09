@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 272 tests passing across 25 test files
+- **Test Status**: All 275 tests passing across 25 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -211,7 +211,7 @@ Historical analysis uses **current** account state instead of state **at the tim
 | Signal | Field | Status | Impact |
 |--------|-------|--------|--------|
 | AccountHistorySignal | `accountAgeDays` | **Fixed** | Was using `new Date()` instead of trade timestamp |
-| AccountHistorySignal | `totalTrades` | Bug | First-trade insiders now appear "established" |
+| AccountHistorySignal | `totalTrades` | **Fixed** | Uses `historicalState.tradeCount` when available |
 | AccountHistorySignal | `profitUsd` | Bug | Early profits diluted by later losses |
 | ConvictionSignal | `totalVolumeUsd` | Bug | High-conviction bets appear diversified |
 
@@ -443,3 +443,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added DBAccountFetcher (`src/api/db-accounts.ts`): helper class for database-aware account fetching - retrieves cached accounts from DB, converts DB format to AccountHistory format, detects stale data (default 1hr TTL), saves subgraph data to DB cache; 11 tests pass |
 | 2026-01-08 | Integrated TradeDB into AccountFetcher (`src/api/accounts.ts`): optional `tradeDb` option, checks DB first with 1-hour freshness window, saves fetched data back to DB; backward compatible - existing code without tradeDb works unchanged; 272 tests pass |
 | 2026-01-08 | Added `historicalState` field to SignalContext (`src/signals/types.ts`): optional point-in-time state (tradeCount, volume, pnl, approximate) from database for accurate historical analysis; Phase 4 of trade database implementation |
+| 2026-01-08 | Updated AccountHistorySignal to use `historicalState.tradeCount` when available: falls back to `accountHistory.totalTrades` for backward compatibility; reports `historicalTradeCount: true` in details when using point-in-time data; 3 new tests added (275 total); Task 4.2 complete |
