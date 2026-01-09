@@ -421,3 +421,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Fixed account age calculation bug: now uses trade timestamp instead of current date for historical analysis |
 | 2026-01-08 | Added 4 tests for point-in-time account age calculation |
 | 2026-01-08 | Documented remaining point-in-time bugs in `docs/POINT_IN_TIME_BUG.md`: trade count, profit, and conviction concentration still use current state |
+| 2026-01-08 | Added `better-sqlite3` dependency (v12.5.0) and TypeScript types for SQLite database layer (Phase 1 of trade database implementation) |
