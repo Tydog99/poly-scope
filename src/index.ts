@@ -7,6 +7,7 @@ import { InvestigateCommand } from './commands/investigate.js';
 import { executeMonitor } from './commands/monitor.js';
 import { CLIReporter } from './output/cli.js';
 import { SlugResolver } from './api/slug.js';
+import { promptMarketSelection } from './cli/prompt.js';
 
 const program = new Command();
 
@@ -56,11 +57,20 @@ program
           console.log(`  ${i + 1}. ${m.question}`);
           console.log(`     ID: ${m.conditionId}\n`);
         });
-        console.log('Use --all to analyze all markets, or pass a specific condition ID with -m');
-        return;
+
+        const selectedIndex = await promptMarketSelection(markets);
+        if (selectedIndex >= 0) {
+          // Single market selected
+          markets.splice(0, markets.length, markets[selectedIndex]);
+        } else if (opts.wallet) {
+          // "All" selected but -w flag is present
+          console.error('Error: --wallet (-w) cannot be used when analyzing all markets');
+          process.exit(1);
+        }
+        // If -1 (all) without -w, keep markets array as-is
       }
 
-      // Validate -w is not used with --all
+      // Validate -w is not used with --all flag
       if (opts.wallet && opts.all) {
         console.error('Error: --wallet (-w) cannot be used with --all flag');
         process.exit(1);
