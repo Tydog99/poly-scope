@@ -59,11 +59,9 @@ export class AnalyzeCommand {
 
     this.tradeFetcher = new TradeFetcher({
       subgraphClient: this.subgraphClient,
-      disableCache: !config.subgraph.cacheAccountLookup
     });
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
-      cacheAccountLookup: config.subgraph.cacheAccountLookup
     });
     this.signals = [
       new TradeSizeSignal(),

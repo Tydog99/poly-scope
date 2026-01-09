@@ -40,7 +40,6 @@ program
     if (opts.minSize) config.tradeSize.minAbsoluteUsd = opts.minSize;
     if (opts.threshold) config.alertThreshold = opts.threshold;
     if (opts.subgraph === false) config.subgraph.enabled = false;
-    if (opts.cache === false) config.subgraph.cacheAccountLookup = false;
 
     const command = new AnalyzeCommand(config);
     const reporter = new CLIReporter({ debug: opts.debug });
@@ -265,6 +264,35 @@ dbCommand
 
     rmSync(opts.cacheDir, { recursive: true });
     console.log(`Removed ${opts.cacheDir}`);
+    db.close();
+  });
+
+dbCommand
+  .command('queue')
+  .description('Show pending backfill queue')
+  .option('--limit <n>', 'Maximum entries to show', parseInt)
+  .action(async (opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const db = new TradeDB();
+    const queue = db.getBackfillQueue(opts.limit);
+
+    if (queue.length === 0) {
+      console.log('Backfill queue is empty');
+      db.close();
+      return;
+    }
+
+    console.log(`Backfill queue (${queue.length} pending):\n`);
+    console.log('Priority  Wallet                                      Queued');
+    console.log('--------  ------------------------------------------  -------------------');
+
+    for (const item of queue) {
+      const queuedAt = item.createdAt
+        ? new Date(item.createdAt * 1000).toISOString().replace('T', ' ').slice(0, 19)
+        : 'unknown';
+      console.log(`${String(item.priority).padStart(8)}  ${item.wallet}  ${queuedAt}`);
+    }
+
     db.close();
   });
 

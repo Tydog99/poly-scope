@@ -76,7 +76,6 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
 
   const accountFetcher = new AccountFetcher({
     subgraphClient,
-    cacheAccountLookup: config.subgraph.cacheAccountLookup,
   });
 
   const evaluator = new MonitorEvaluator({

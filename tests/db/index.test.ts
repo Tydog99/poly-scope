@@ -273,5 +273,29 @@ describe('TradeDB', () => {
       tradeDb.queueBackfill('0x123', 1);
       expect(tradeDb.hasQueuedBackfill('0x123')).toBe(true);
     });
+
+    it('respects limit parameter', () => {
+      tradeDb.queueBackfill('0x123', 1);
+      tradeDb.queueBackfill('0x456', 10);
+      tradeDb.queueBackfill('0x789', 5);
+      expect(tradeDb.getBackfillQueue(2)).toHaveLength(2);
+      expect(tradeDb.getBackfillQueue(2).map(q => q.wallet)).toEqual(['0x456', '0x789']);
+    });
+
+    it('sets createdAt timestamp when queuing', () => {
+      const before = Math.floor(Date.now() / 1000);
+      tradeDb.queueBackfill('0x123', 1);
+      const after = Math.floor(Date.now() / 1000);
+
+      const queue = tradeDb.getBackfillQueue();
+      expect(queue[0].createdAt).toBeGreaterThanOrEqual(before);
+      expect(queue[0].createdAt).toBeLessThanOrEqual(after);
+    });
+
+    it('returns priority in queue items', () => {
+      tradeDb.queueBackfill('0x123', 42);
+      const queue = tradeDb.getBackfillQueue();
+      expect(queue[0].priority).toBe(42);
+    });
   });
 });
