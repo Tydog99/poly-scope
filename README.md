@@ -49,13 +49,48 @@ npm run dev -- investigate -w <wallet> --trades 50
 npm run dev -- analyze -m <market> --no-subgraph
 npm run dev -- investigate -w <wallet> --no-subgraph
 
-# Enable account lookup caching (saves results to .cache/accounts/)
-npm run dev -- analyze -m <market> --cache-account-lookup
 ```
 
-## Caching
+## Database
 
-Trades are cached locally in `.cache/trades/` to avoid re-fetching on subsequent runs. The cache stores trades by market ID and only fetches new trades on subsequent runs.
+Trade and account data is stored in a local SQLite database (`.data/trades.db`) for:
+- Persistent caching across sessions
+- Point-in-time historical queries
+- Background backfill of large wallets
+
+### Database Commands
+
+```bash
+# Show database statistics
+npm run dev -- db status
+
+# Show database info for a wallet
+npm run dev -- db wallet 0x123...
+
+# Backfill trade history for queued wallets
+npm run dev -- db backfill
+
+# Backfill a specific wallet
+npm run dev -- db backfill 0x123...
+
+# Limit number of wallets to backfill
+npm run dev -- db backfill --max 5
+```
+
+### Migration from JSON Cache
+
+If you have existing data in `.cache/`, migrate to SQLite:
+
+```bash
+# Step 1: Import JSON cache (safe, idempotent)
+npm run dev -- db import
+
+# Step 2: Verify counts match
+npm run dev -- db validate
+
+# Step 3: Remove old cache (only if validation passes)
+npm run dev -- db cleanup-cache
+```
 
 ## Real-Time Monitoring
 
@@ -282,7 +317,7 @@ The tool implements a multi-tier data fetching strategy:
 - `subgraph` - Valid Account entity data
 - `subgraph-trades` - Fixed via actual trade query
 - `data-api` - Polymarket Data API fallback
-- `cache` - Loaded from local cache
+- `cache` - Loaded from SQLite database cache
 
 ### Environment Variable
 
