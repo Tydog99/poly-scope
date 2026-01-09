@@ -2,13 +2,14 @@ import type { Config } from '../config.js';
 import { AccountFetcher } from '../api/accounts.js';
 import { PolymarketClient } from '../api/client.js';
 import { createSubgraphClient, type SubgraphClient } from '../api/subgraph.js';
-import { getMarketResolver, type ResolvedToken } from '../api/market-resolver.js';
+import { getMarketResolver, saveResolvedMarketsToDb, type ResolvedToken } from '../api/market-resolver.js';
 import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregator } from '../signals/index.js';
 import type { AccountHistory, SignalContext } from '../signals/types.js';
 import type { SubgraphTrade, SubgraphPosition, SubgraphRedemption, AggregatedTrade } from '../api/types.js';
 import type { SuspiciousTrade } from '../output/types.js';
 import { aggregateFills } from '../api/aggregator.js';
 import { buildTokenToOutcomeFromResolved, scoreTrades } from './shared.js';
+import { TradeDB } from '../db/index.js';
 
 export interface InvestigateOptions {
   wallet: string;
@@ -46,6 +47,7 @@ export class InvestigateCommand {
   private accountFetcher: AccountFetcher;
   private polymarketClient: PolymarketClient;
   private subgraphClient: SubgraphClient | null;
+  private tradeDb: TradeDB;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
 
@@ -61,8 +63,12 @@ export class InvestigateCommand {
       this.subgraphClient = null;
     }
 
+    // Initialize database for account caching
+    this.tradeDb = new TradeDB();
+
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
+      tradeDb: this.tradeDb,
     });
 
     // Initialize signals for trade analysis
@@ -88,18 +94,15 @@ export class InvestigateCommand {
 
     // Blocking backfill for target wallet - ensure we have full history
     try {
-      const { TradeDB } = await import('../db/index.js');
       const { backfillWallet } = await import('../db/backfill.js');
 
-      const db = new TradeDB();
-      const account = db.getAccount(normalizedWallet);
+      const account = this.tradeDb.getAccount(normalizedWallet);
 
       // Only backfill if we don't have full history
       if (!account?.hasFullHistory && this.subgraphClient) {
         console.log(`Fetching complete trade history for ${normalizedWallet.slice(0, 8)}...`);
-        await backfillWallet(db, this.subgraphClient, normalizedWallet);
+        await backfillWallet(this.tradeDb, this.subgraphClient, normalizedWallet);
       }
-      db.close();
     } catch (e) {
       console.warn('Could not complete backfill:', (e as Error).message);
       // Continue with analysis even if backfill fails
@@ -188,6 +191,11 @@ export class InvestigateCommand {
         const unresolvedCount = tokenIds.size - resolvedCount;
         if (unresolvedCount > 0) {
           console.log(`  Resolved ${resolvedCount}/${tokenIds.size} markets (${unresolvedCount} not found - may be archived)`);
+        }
+
+        // Save resolved markets to DB
+        if (resolvedMarketsMap.size > 0) {
+          saveResolvedMarketsToDb(resolvedMarketsMap, this.tradeDb);
         }
       }
     }

@@ -7,10 +7,11 @@ import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregat
 import { TradeClassifier } from '../signals/classifier.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
-import { getMarketResolver } from '../api/market-resolver.js';
+import { getMarketResolver, saveResolvedMarketsToDb } from '../api/market-resolver.js';
 import { aggregateFills } from '../api/aggregator.js';
 import type { Market, SubgraphTrade } from '../api/types.js';
 import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
+import { TradeDB } from '../db/index.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -38,6 +39,7 @@ export class AnalyzeCommand {
   private tradeFetcher: TradeFetcher;
   private accountFetcher: AccountFetcher;
   private subgraphClient: SubgraphClient | null;
+  private tradeDb: TradeDB;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
   private classifier: TradeClassifier;
@@ -57,11 +59,15 @@ export class AnalyzeCommand {
       }
     }
 
+    // Initialize database for account caching
+    this.tradeDb = new TradeDB();
+
     this.tradeFetcher = new TradeFetcher({
       subgraphClient: this.subgraphClient,
     });
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
+      tradeDb: this.tradeDb,
     });
     this.signals = [
       new TradeSizeSignal(),
@@ -110,6 +116,11 @@ export class AnalyzeCommand {
       const resolvedTokens = await resolver.resolveBatch(marketTokenIds);
       const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedTokens);
 
+      // Save resolved markets to DB
+      if (resolvedTokens.size > 0) {
+        saveResolvedMarketsToDb(resolvedTokens, this.tradeDb);
+      }
+
       // Fetch positions to determine which token wallet has position in
       const positions = await this.subgraphClient.getPositions(options.wallet);
 
@@ -127,6 +138,17 @@ export class AnalyzeCommand {
 
       if (this.subgraphClient && hasTokens) {
         const tokenToOutcome = buildTokenToOutcome(market);
+
+        // Save market tokens to DB
+        const dbMarkets: import('../db/index.js').DBMarket[] = market.tokens.map((t, i) => ({
+          tokenId: t.tokenId,
+          conditionId: market.conditionId || null,
+          question: market.question || null,
+          outcome: t.outcome || null,
+          outcomeIndex: i,
+          resolvedAt: null,
+        }));
+        this.tradeDb.saveMarkets(dbMarkets);
 
         // Get raw fills (not pre-aggregated) for aggregation
         const rawFills = await this.fetchRawFills(market, options);
@@ -329,17 +351,14 @@ export class AnalyzeCommand {
 
     // Opportunistic backfill after analysis
     try {
-      const { TradeDB } = await import('../db/index.js');
       const { runBackfill } = await import('../db/backfill.js');
 
-      const db = new TradeDB();
-      const queue = db.getBackfillQueue();
+      const queue = this.tradeDb.getBackfillQueue();
 
       if (queue.length > 0 && this.subgraphClient) {
         console.log(`\nBackfilling ${Math.min(5, queue.length)} wallets from queue...`);
-        await runBackfill(db, this.subgraphClient, { maxWallets: 5 });
+        await runBackfill(this.tradeDb, this.subgraphClient, { maxWallets: 5 });
       }
-      db.close();
     } catch (e) {
       // Don't fail analysis if backfill fails
       console.error('Backfill error:', (e as Error).message);

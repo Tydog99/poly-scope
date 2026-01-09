@@ -53,6 +53,15 @@ export interface DBRedemption {
   payout: number;
 }
 
+export interface DBMarket {
+  tokenId: string;
+  conditionId: string | null;
+  question: string | null;
+  outcome: string | null;
+  outcomeIndex: number | null;
+  resolvedAt: number | null;
+}
+
 export interface BackfillQueueItem {
   wallet: string;
   priority: number;
@@ -229,6 +238,30 @@ export class TradeDB {
       SELECT id, wallet, condition_id as conditionId, timestamp, payout
       FROM redemptions WHERE wallet = ? ORDER BY timestamp DESC
     `).all(wallet.toLowerCase()) as DBRedemption[];
+  }
+
+  saveMarkets(markets: DBMarket[]): number {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO markets (token_id, condition_id, question, outcome, outcome_index, resolved_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    let inserted = 0;
+    const insertMany = this.db.transaction((markets: DBMarket[]) => {
+      for (const m of markets) {
+        const result = stmt.run(m.tokenId, m.conditionId, m.question, m.outcome, m.outcomeIndex, m.resolvedAt);
+        inserted += result.changes;
+      }
+    });
+    insertMany(markets);
+    return inserted;
+  }
+
+  getMarket(tokenId: string): DBMarket | null {
+    const row = this.db.prepare(`
+      SELECT token_id as tokenId, condition_id as conditionId, question, outcome, outcome_index as outcomeIndex, resolved_at as resolvedAt
+      FROM markets WHERE token_id = ?
+    `).get(tokenId) as DBMarket | undefined;
+    return row ?? null;
   }
 
   queueBackfill(wallet: string, priority: number = 0): void {
