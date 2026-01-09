@@ -7,7 +7,7 @@ Last updated: 2026-01-08
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 221 tests passing across 21 test files
+- **Test Status**: All 226 tests passing across 22 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (3)
@@ -422,3 +422,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Added 4 tests for point-in-time account age calculation |
 | 2026-01-08 | Documented remaining point-in-time bugs in `docs/POINT_IN_TIME_BUG.md`: trade count, profit, and conviction concentration still use current state |
 | 2026-01-08 | Added `better-sqlite3` dependency (v12.5.0) and TypeScript types for SQLite database layer (Phase 1 of trade database implementation) |
+| 2026-01-08 | Added SQLite schema (`src/db/schema.ts`) with trades, accounts, redemptions, markets, backfill_queue tables; WAL mode enabled; 5 tests pass |
