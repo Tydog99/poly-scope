@@ -268,4 +268,36 @@ dbCommand
     db.close();
   });
 
+dbCommand
+  .command('backfill [wallet]')
+  .description('Backfill trade history for queued wallets or a specific wallet')
+  .option('--max <n>', 'Maximum wallets to process', parseInt)
+  .action(async (wallet: string | undefined, opts) => {
+    const { TradeDB } = await import('./db/index.js');
+    const { createSubgraphClient } = await import('./api/subgraph.js');
+    const { runBackfill, backfillWallet } = await import('./db/backfill.js');
+
+    const db = new TradeDB();
+    const subgraph = createSubgraphClient();
+
+    if (!subgraph) {
+      console.error('Error: THE_GRAPH_API_KEY environment variable is required');
+      db.close();
+      process.exit(1);
+    }
+
+    if (wallet) {
+      console.log(`Backfilling ${wallet}...`);
+      await backfillWallet(db, subgraph, wallet);
+      console.log('Done');
+    } else {
+      const queueSize = db.getBackfillQueue().length;
+      console.log(`Processing ${Math.min(opts.max ?? 10, queueSize)} of ${queueSize} queued wallets...`);
+      const processed = await runBackfill(db, subgraph, { maxWallets: opts.max });
+      console.log(`Processed ${processed} wallets`);
+    }
+
+    db.close();
+  });
+
 program.parse();

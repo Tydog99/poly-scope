@@ -42,6 +42,7 @@ Last updated: 2026-01-08
    - `db import [--cache-dir <path>]` - Imports trades, accounts, redemptions from JSON cache files (idempotent)
    - `db validate [--cache-dir <path>]` - Validates migration by comparing DB and JSON counts
    - `db cleanup-cache [--cache-dir <path>]` - Removes JSON cache directory (only after validation passes)
+   - `db backfill [wallet] [--max <n>]` - Backfill trade history for queued wallets or a specific wallet
 
 ### Three Weighted Detection Signals
 
@@ -446,3 +447,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Updated AccountHistorySignal to use `historicalState.tradeCount` when available: falls back to `accountHistory.totalTrades` for backward compatibility; reports `historicalTradeCount: true` in details when using point-in-time data; 3 new tests added (275 total); Task 4.2 complete |
 | 2026-01-08 | Updated ConvictionSignal to use `historicalState.volume` when available: converts from 6-decimal scaled integer to USD; falls back to `accountHistory.totalVolumeUsd` for backward compatibility; reports `usingHistoricalState: true` in details; 2 new tests added (277 total); Task 4.3 complete |
 | 2026-01-08 | Added backfill runner (`src/db/backfill.ts`): `runBackfill()` processes queued wallets in priority order with configurable limits, `backfillWallet()` fetches all historical trades from subgraph with pagination and saves to DB, graceful error handling (doesn't mark complete on failure); 9 tests added (286 total); Task 5.1 complete |
+| 2026-01-08 | Added `db backfill` CLI command: `db backfill` processes queued wallets (default 10), `db backfill 0x...` backfills specific wallet, `--max <n>` limits wallets to process; requires THE_GRAPH_API_KEY; Task 5.2 complete |
