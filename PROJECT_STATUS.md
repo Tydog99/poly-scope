@@ -36,13 +36,15 @@ Last updated: 2026-01-08
    - Color-coded output: YES (blue), NO (yellow)
    - Uses 5-minute in-memory cache for account lookups
 
-4. **`db`** - Database management commands
-   - `db status` - Shows database statistics (file size, table row counts, backfill queue length)
-   - `db wallet <address>` - Shows wallet info (creation date, sync window, trade count, backfill status)
-   - `db import [--cache-dir <path>]` - Imports trades, accounts, redemptions from JSON cache files (idempotent)
-   - `db validate [--cache-dir <path>]` - Validates migration by comparing DB and JSON counts
-   - `db cleanup-cache [--cache-dir <path>]` - Removes JSON cache directory (only after validation passes)
-   - `db backfill [wallet] [--max <n>]` - Backfill trade history for queued wallets or a specific wallet
+4. **`db`** - Database management commands (SQLite at `.data/trades.db`)
+   - `db status` - Shows database file size, table row counts, backfill queue length
+   - `db wallet <address>` - Shows wallet creation date, sync window, trade count, backfill status
+   - `db import [--cache-dir <path>]` - Import trades/accounts/redemptions from JSON cache (idempotent)
+   - `db validate [--cache-dir <path>]` - Verify DB counts match JSON cache counts
+   - `db cleanup-cache [--cache-dir <path>]` - Remove JSON cache directory (run after validate)
+   - `db backfill [wallet] [--max <n>]` - Backfill trade history from subgraph
+     - No args: process up to `--max` (default 10) wallets from queue
+     - With wallet address: backfill that specific wallet immediately
 
 ### Three Weighted Detection Signals
 
@@ -99,14 +101,33 @@ Last updated: 2026-01-08
   - Trade cap varies by market (10k-100k trades observed)
   - Pagination via offset
   - No server-side date filtering
-  - Caching system (`.cache/trades/`)
+  - Used when subgraph is unavailable
 
-### Caching & Performance
-- **TradeCache** system stores trades locally in `.cache/trades/`
-- Merges new trades with cached data
-- Deduplicates by trade ID
-- Tracks newest/oldest timestamps for smart backfilling
-- **Account Lookups**: Currently NOT cached to ensure fresh profit/volume data; performance is maintained via Subgraph batching.
+### SQLite Database Layer
+
+**Database Location**: `.data/trades.db` (SQLite with WAL mode)
+
+**Tables**:
+- `trades` - All trade fills with wallet, market, timestamp, size, price, side, role
+- `accounts` - Wallet metadata: creation timestamp, synced_from/to watermarks, complete flag
+- `redemptions` - Winning token redemptions with payout amounts
+- `markets` - Token ID to condition ID mapping
+- `backfill_queue` - Pending wallet backfill requests with priority
+- `schema_version` - Database migration tracking
+
+**Key Features**:
+- **Point-in-Time Queries**: `getAccountStateAt(wallet, timestamp)` computes trade count, volume, and P&L at any historical moment
+- **Sync Watermarks**: Tracks earliest/latest synced timestamp per wallet for incremental backfill
+- **Background Backfill**: Priority queue system for opportunistic history fetching
+- **Automatic Caching**: AccountFetcher saves fetched data to DB with 1-hour freshness window
+- **WAL Mode**: Concurrent reads during writes for better performance
+
+**Migration from JSON Cache**:
+```bash
+./dist/index.js db import        # Import .cache/ JSON files
+./dist/index.js db validate      # Verify counts match
+./dist/index.js db cleanup-cache # Remove old .cache/ directory
+```
 
 ### Configuration System
 - `config.json` at project root
@@ -119,23 +140,30 @@ Last updated: 2026-01-08
 
 ## 2. Test Coverage Analysis
 
-### Test Suite (1,519 total lines)
+### Test Suite (257 tests across 23 files)
 
 | Module | Tests | Status | Notes |
 |--------|-------|--------|-------|
 | `config.test.ts` | 4 tests | Pass | Config loading, defaults, overrides, monitor config |
 | `signals/tradeSize.test.ts` | 4 tests | Pass | Threshold, size scaling, market impact |
-| `signals/accountHistory.test.ts` | 10 tests | Pass | All scoring components, edge cases |
-| `signals/conviction.test.ts` | 4 tests | Pass | Concentration scoring |
+| `signals/accountHistory.test.ts` | 13 tests | Pass | All scoring components, edge cases, historicalState |
+| `signals/conviction.test.ts` | 6 tests | Pass | Concentration scoring, historicalState |
 | `signals/aggregator.test.ts` | 5 tests | Pass | Weighted aggregation, alert flagging |
 | `api/slug.test.ts` | 3 tests | Pass | Slug resolution, condition ID handling |
 | `api/client.test.ts` | 2 tests | Pass | Market fetching |
 | `api/trades.test.ts` | 7 tests | Pass | Data API conversion, filtering |
-| `api/accounts.test.ts` | 6 tests | Pass | Subgraph fallback, Data API |
+| `api/accounts.test.ts` | 17 tests | Pass | Subgraph fallback, Data API, DB integration |
 | `api/subgraph.test.ts` | 14 tests | Pass | Account queries, trade queries, error handling |
+| `api/aggregator.test.ts` | 7 tests | Pass | Fill aggregation, complementary trades |
+| `api/db-accounts.test.ts` | 11 tests | Pass | DB account fetcher helper |
+| `db/index.test.ts` | 30 tests | Pass | CRUD, point-in-time queries, backfill queue |
+| `db/schema.test.ts` | 5 tests | Pass | Table creation, migrations |
+| `db/migrate.test.ts` | 5 tests | Pass | JSON import, validation |
+| `db/backfill.test.ts` | 9 tests | Pass | Queue processing, wallet backfill |
 | `commands/analyze.test.ts` | 3 tests | Pass | Market analysis, filtering, account enrichment |
 | `integration/analyze.test.ts` | 2 tests | Pass | Real fixture data (Venezuela market) |
 | `output/cli.test.ts` | 3 tests | Pass | Report formatting |
+| `monitor/*.test.ts` | 4 tests | Pass | Stream, evaluator, trade normalization |
 
 ### Integration Test Fixture
 - Venezuela market data (`tests/fixtures/venezuela-market.json`)
@@ -205,18 +233,18 @@ The subgraph client has advanced methods that aren't integrated into the main co
 - Asset IDs are decimal (not hex condition IDs)
 - Query complexity limits apply
 
-### Point-in-Time Analysis Bug (Partially Fixed)
+### Point-in-Time Analysis (Fixed via Database)
 
-Historical analysis uses **current** account state instead of state **at the time of the analyzed trade**. This can cause insider trades to be missed when analyzing old markets.
+Historical analysis now uses **point-in-time account state** from the database instead of current state. This enables accurate detection of insider trades when analyzing old markets.
 
-| Signal | Field | Status | Impact |
-|--------|-------|--------|--------|
-| AccountHistorySignal | `accountAgeDays` | **Fixed** | Was using `new Date()` instead of trade timestamp |
-| AccountHistorySignal | `totalTrades` | **Fixed** | Uses `historicalState.tradeCount` when available |
-| AccountHistorySignal | `profitUsd` | Bug | Early profits diluted by later losses |
-| ConvictionSignal | `totalVolumeUsd` | **Fixed** | Uses `historicalState.volume` when available |
+| Signal | Field | Status | How It Works |
+|--------|-------|--------|--------------|
+| AccountHistorySignal | `accountAgeDays` | **Fixed** | Calculates age relative to trade timestamp |
+| AccountHistorySignal | `totalTrades` | **Fixed** | Uses `historicalState.tradeCount` from `getAccountStateAt()` |
+| AccountHistorySignal | `profitUsd` | **Fixed** | Uses `historicalState.pnl` computed from trades before analyzed timestamp |
+| ConvictionSignal | `totalVolumeUsd` | **Fixed** | Uses `historicalState.volume` computed from trades before analyzed timestamp |
 
-See `docs/POINT_IN_TIME_BUG.md` for detailed analysis and proposed fixes.
+**Requirements**: Point-in-time analysis requires the wallet's trade history to be backfilled. The system automatically queues wallets for backfill during analysis and marks results as "approximate" when history is incomplete.
 
 ### Technical Considerations
 
@@ -247,16 +275,18 @@ See `docs/POINT_IN_TIME_BUG.md` for detailed analysis and proposed fixes.
 
 ## 7. Dependency Analysis
 
-**Production Dependencies** (6):
+**Production Dependencies** (7):
 - `@polymarket/clob-client` - Official Polymarket SDK
 - `@polymarket/real-time-data-client` - WebSocket client for real-time trade data
+- `better-sqlite3` - SQLite database driver (synchronous, fast)
 - `chalk` - Terminal colors
 - `commander` - CLI argument parsing
 - `dotenv` - Environment variable loading
 - `ws` - WebSocket (included via clob-client)
 
-**Dev Dependencies** (5):
+**Dev Dependencies** (6):
 - TypeScript, Vitest, tsx, @types packages
+- `@types/better-sqlite3` - TypeScript types for SQLite
 
 **Security**: No known vulnerabilities in dependency chain
 
@@ -269,18 +299,20 @@ See `docs/POINT_IN_TIME_BUG.md` for detailed analysis and proposed fixes.
 | Market analysis | Working | Top 10 suspicious trades |
 | Wallet investigation | Working | Deep-dive profiles |
 | Trade size signal | Working | With market impact scoring |
-| Account history signal | Working | With profit analysis |
-| Conviction signal | Working | Position concentration |
+| Account history signal | Working | With profit analysis, historicalState support |
+| Conviction signal | Working | Position concentration, historicalState support |
 | Subgraph integration | Working | Primary data source |
-| Data API fallback | Working | With caching |
+| Data API fallback | Working | For trades when subgraph unavailable |
+| SQLite database | Working | Replaces JSON caching, `.data/trades.db` |
+| Point-in-time analysis | Working | Via `getAccountStateAt()` queries |
+| Background backfill | Working | Priority queue with opportunistic fetching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 200/200 passing |
+| Test suite | Working | 257/257 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
 | Real-time monitoring | Working | `monitor` command with WebSocket |
 | Watchlist feature | Working | Used by `monitor` command |
-| Auth for CLOB API | Not implemented | Module exists, not used |
 | Batch wallet analysis | Not implemented | Can only analyze one wallet |
 | Export formats | Not implemented | CLI only |
 | Alerts/notifications | Not implemented | No webhook/email support |
@@ -295,22 +327,29 @@ src/
 ├── api/              (Data layer)
 │   ├── client.ts     - Polymarket CLOB client wrapper
 │   ├── trades.ts     - Trade fetching (subgraph + Data API)
-│   ├── accounts.ts   - Account history
+│   ├── accounts.ts   - Account history (with DB caching)
+│   ├── db-accounts.ts - Database-aware account fetcher helper
 │   ├── subgraph.ts   - The Graph GraphQL queries
 │   ├── slug.ts       - Market slug resolution
 │   ├── market-resolver.ts - Token ID to market name mapping
-│   ├── cache.ts      - Trade caching
+│   ├── aggregator.ts - Trade fill aggregation by transaction
 │   └── types.ts      - Type definitions
+├── db/               (SQLite database layer)
+│   ├── index.ts      - TradeDB class: init, CRUD, point-in-time queries
+│   ├── schema.ts     - Table definitions, migrations
+│   ├── migrate.ts    - JSON cache import/validation
+│   └── backfill.ts   - Background trade history fetcher
 ├── signals/          (Detection engine)
 │   ├── tradeSize.ts  - Trade size scoring
-│   ├── accountHistory.ts - Account analysis
-│   ├── conviction.ts - Position concentration
+│   ├── accountHistory.ts - Account analysis (uses historicalState)
+│   ├── conviction.ts - Position concentration (uses historicalState)
 │   ├── aggregator.ts - Weighted combination
-│   └── types.ts      - Signal types
+│   └── types.ts      - Signal types (includes SignalContext.historicalState)
 ├── commands/         (CLI commands)
-│   ├── analyze.ts    - Market analysis
-│   ├── investigate.ts - Wallet investigation
-│   └── monitor.ts    - Real-time monitoring command
+│   ├── analyze.ts    - Market analysis (triggers backfill)
+│   ├── investigate.ts - Wallet investigation (blocking backfill)
+│   ├── monitor.ts    - Real-time monitoring (opportunistic backfill)
+│   └── db.ts         - Database management subcommands
 ├── monitor/          (Real-time monitoring)
 │   ├── stream.ts     - WebSocket wrapper with reconnection
 │   ├── evaluator.ts  - Real-time trade evaluator with session cache
@@ -321,9 +360,10 @@ src/
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (20 test files, 200 tests)
-scripts/ (3 utilities)
+tests/ (23 test files, 257 tests)
+scripts/ (2 utilities)
 docs/ (Planning documents)
+.data/ (SQLite database - gitignored)
 ```
 
 ---
@@ -332,10 +372,12 @@ docs/ (Planning documents)
 
 ### Critical
 - [x] ~~**Remove 50 account lookups limit**~~ - Implemented two-pass batch fetching with chunked subgraph queries (100 wallets per batch). No longer limited to 50 accounts.
+- [x] ~~**Point-in-Time Analysis Bug**~~ - Fixed via SQLite database with `getAccountStateAt()` queries. All signals now use historical state when available.
 
 ### Immediate (Polish & Cleanup)
 - [x] ~~Decide on `scripts/test-subgraph.ts`~~ - deleted
 - [x] ~~Remove unused `src/api/auth.ts`~~ - deleted
+- [x] ~~Remove old JSON cache classes~~ - deleted AccountCache, TradeCache, RedemptionCache, TradeCountCache
 - [ ] Integrate unused subgraph queries into commands
 - [ ] Create test transactions for SELLING YES/NO both high value and low value shares (to verify complementary token filtering)
 
@@ -347,11 +389,12 @@ docs/ (Planning documents)
 - [ ] Export formats (JSON/CSV)
 - [x] ~~Watchlist support~~ - Implemented via `monitor` command config watchlist
 - [x] ~~**Market name resolution**~~ - Fixed! Uses Gamma API `clob_token_ids` param with repeated format.
+- [x] ~~**SQLite database layer**~~ - Replaces JSON caching with proper relational database
 
 ### Advanced Features
 - [x] ~~Real-time monitoring mode~~ - Implemented via `monitor` command
+- [x] ~~**Persistence layer for results**~~ - SQLite database at `.data/trades.db`
 - [ ] Alert notifications (webhooks, Discord, email)
-- [ ] Persistence layer for results
 - [ ] Web dashboard
 
 ---
@@ -451,3 +494,4 @@ docs/ (Planning documents)
 | 2026-01-08 | Integrated backfill triggers into commands: `analyze` drains up to 5 wallets from queue after analysis, `investigate` does blocking backfill of target wallet before analysis (if history incomplete), `monitor` opportunistically backfills up to 3 wallets after 30s idle; all failures are graceful (commands continue); 286 tests pass; Task 5.3 complete |
 | 2026-01-08 | Removed old JSON cache classes (Phase 6 cleanup): deleted `AccountCache`, `TradeCache`, `RedemptionCache`, `TradeCountCache` from `src/api/`; removed cache imports from `accounts.ts` and `trades.ts`; simplified TradeFetcher to fetch directly without caching; AccountFetcher now uses TradeDB exclusively for caching; deleted 4 cache files and 3 test files; moved `TradeCountData` type to `types.ts`; 257 tests pass |
 | 2026-01-08 | Added `.data/` to `.gitignore` for SQLite database directory (`.data/trades.db` and WAL files) |
+| 2026-01-08 | **Trade Database Implementation Complete**: SQLite replaces JSON caching; point-in-time analysis via `getAccountStateAt()`; background backfill system; 6 new `db` CLI commands; all signals use historicalState; 257 tests pass |
