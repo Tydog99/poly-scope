@@ -250,9 +250,9 @@ export class CLIReporter {
           const dormancyScore = details.dormancyScore as number | undefined;
           const profitScore = details.profitScore as number | undefined;
 
-          lines.push(chalk.gray(`    - Trade count: ${totalTrades || '?'} -> ${tradeCountScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Account age: ${ageDays || '?'} days -> ${ageScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Dormancy: ${dormancy || 0} days idle -> ${dormancyScore ?? 0} pts`));
+          lines.push(chalk.gray(`    - Trade count: ${totalTrades ?? '?'} -> ${tradeCountScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Account age: ${ageDays ?? '?'} days -> ${ageScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Dormancy: ${dormancy ?? 0} days idle -> ${dormancyScore ?? 0} pts`));
           if (profitUsd !== undefined && profitScore !== undefined) {
             lines.push(chalk.gray(`    - Profit on new account: ${this.formatUsd(profitUsd)} -> ${profitScore} pts`));
           } else {
@@ -444,8 +444,8 @@ export class CLIReporter {
         const sizeScore = details.sizeScore as number | undefined;
         const impactScore = details.impactScore as number | undefined;
         detailStr = `value=$${Math.round(valueUsd || 0).toLocaleString()}, ` +
-          `impact=${impactPct?.toFixed(1) || '?'}%, ` +
-          `sizeScore=${sizeScore || '?'}, impactScore=${impactScore || '?'}`;
+          `impact=${impactPct?.toFixed(1) ?? '?'}%, ` +
+          `sizeScore=${sizeScore ?? '?'}, impactScore=${impactScore ?? '?'}`;
       } else if (signal.name === 'accountHistory') {
         const reason = details.reason as string | undefined;
         if (reason === 'skipped_budget') {
@@ -458,8 +458,8 @@ export class CLIReporter {
           const dormancy = details.dormancyDays as number | undefined;
           const dataSource = details.dataSource as string | undefined;
           const profitUsd = details.profitUsd as number | undefined;
-          detailStr = `trades=${totalTrades || '?'}, age=${ageDays || '?'}d, ` +
-            `dormancy=${dormancy || 0}d` +
+          detailStr = `trades=${totalTrades ?? '?'}, age=${ageDays ?? '?'}d, ` +
+            `dormancy=${dormancy ?? 0}d` +
             (profitUsd !== undefined ? `, profit=$${Math.round(profitUsd).toLocaleString()}` : '') +
             ` [${dataSource || '?'}]`;
         }
