@@ -225,4 +225,53 @@ describe('TradeDB', () => {
       expect(tradeDb.getAccountStateAt('0x123', 2500).approximate).toBe(false);
     });
   });
+
+  describe('redemptions', () => {
+    const mockRedemption = {
+      id: 'r-123', wallet: '0x123', conditionId: '0xcond', timestamp: 1704067200, payout: 100000000,
+    };
+
+    it('saves redemptions', () => {
+      expect(tradeDb.saveRedemptions([mockRedemption])).toBe(1);
+      expect(tradeDb.getStatus().redemptions).toBe(1);
+    });
+
+    it('is idempotent', () => {
+      tradeDb.saveRedemptions([mockRedemption]);
+      expect(tradeDb.saveRedemptions([mockRedemption])).toBe(0);
+    });
+
+    it('retrieves redemptions for a wallet', () => {
+      tradeDb.saveRedemptions([mockRedemption, { ...mockRedemption, id: 'r-456', wallet: '0x456' }]);
+      expect(tradeDb.getRedemptionsForWallet('0x123')).toHaveLength(1);
+    });
+  });
+
+  describe('backfill queue', () => {
+    it('queues a wallet for backfill', () => {
+      tradeDb.queueBackfill('0x123', 5);
+      const queue = tradeDb.getBackfillQueue();
+      expect(queue).toHaveLength(1);
+      expect(queue[0].wallet).toBe('0x123');
+    });
+
+    it('orders by priority descending', () => {
+      tradeDb.queueBackfill('0x123', 1);
+      tradeDb.queueBackfill('0x456', 10);
+      tradeDb.queueBackfill('0x789', 5);
+      expect(tradeDb.getBackfillQueue().map(q => q.wallet)).toEqual(['0x456', '0x789', '0x123']);
+    });
+
+    it('marks backfill as complete', () => {
+      tradeDb.queueBackfill('0x123', 1);
+      tradeDb.markBackfillComplete('0x123');
+      expect(tradeDb.getBackfillQueue()).toHaveLength(0);
+    });
+
+    it('checks if wallet has pending backfill', () => {
+      expect(tradeDb.hasQueuedBackfill('0x123')).toBe(false);
+      tradeDb.queueBackfill('0x123', 1);
+      expect(tradeDb.hasQueuedBackfill('0x123')).toBe(true);
+    });
+  });
 });

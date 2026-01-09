@@ -45,6 +45,22 @@ export interface PointInTimeState {
   approximate: boolean;
 }
 
+export interface DBRedemption {
+  id: string;
+  wallet: string;
+  conditionId: string;
+  timestamp: number;
+  payout: number;
+}
+
+export interface BackfillQueueItem {
+  wallet: string;
+  priority: number;
+  createdAt: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
 export class TradeDB {
   private db: Database.Database;
   private dbPath: string;
@@ -191,5 +207,58 @@ export class TradeDB {
     `).get(wallet.toLowerCase(), atTimestamp) as { tradeCount: number; volume: number; pnl: number };
 
     return { ...result, approximate };
+  }
+
+  saveRedemptions(redemptions: DBRedemption[]): number {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO redemptions (id, wallet, condition_id, timestamp, payout)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    let inserted = 0;
+    const insertMany = this.db.transaction((redemptions: DBRedemption[]) => {
+      for (const r of redemptions) {
+        inserted += stmt.run(r.id, r.wallet.toLowerCase(), r.conditionId, r.timestamp, r.payout).changes;
+      }
+    });
+    insertMany(redemptions);
+    return inserted;
+  }
+
+  getRedemptionsForWallet(wallet: string): DBRedemption[] {
+    return this.db.prepare(`
+      SELECT id, wallet, condition_id as conditionId, timestamp, payout
+      FROM redemptions WHERE wallet = ? ORDER BY timestamp DESC
+    `).all(wallet.toLowerCase()) as DBRedemption[];
+  }
+
+  queueBackfill(wallet: string, priority: number = 0): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO backfill_queue (wallet, priority, created_at, started_at, completed_at)
+      VALUES (?, ?, strftime('%s', 'now'), NULL, NULL)
+    `).run(wallet.toLowerCase(), priority);
+  }
+
+  getBackfillQueue(limit?: number): BackfillQueueItem[] {
+    let sql = `
+      SELECT wallet, priority, created_at as createdAt, started_at as startedAt, completed_at as completedAt
+      FROM backfill_queue WHERE completed_at IS NULL ORDER BY priority DESC, created_at ASC
+    `;
+    if (limit) sql += ` LIMIT ${limit}`;
+    return this.db.prepare(sql).all() as BackfillQueueItem[];
+  }
+
+  markBackfillStarted(wallet: string): void {
+    this.db.prepare(`UPDATE backfill_queue SET started_at = strftime('%s', 'now') WHERE wallet = ?`)
+      .run(wallet.toLowerCase());
+  }
+
+  markBackfillComplete(wallet: string): void {
+    this.db.prepare(`UPDATE backfill_queue SET completed_at = strftime('%s', 'now') WHERE wallet = ?`)
+      .run(wallet.toLowerCase());
+  }
+
+  hasQueuedBackfill(wallet: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM backfill_queue WHERE wallet = ? AND completed_at IS NULL`)
+      .get(wallet.toLowerCase()) !== undefined;
   }
 }
