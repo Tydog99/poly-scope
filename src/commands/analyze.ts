@@ -300,9 +300,13 @@ export class AnalyzeCommand {
         ? targetAccountHistory
         : accountHistories.get(trade.wallet.toLowerCase());
 
-      // Get point-in-time historical state from DB (properly aggregated volume)
-      const tradeTimestamp = Math.floor(trade.timestamp.getTime() / 1000);
-      const historicalState = this.tradeDb.getAccountStateAt(trade.wallet, tradeTimestamp);
+      // Only compute historicalState for candidate wallets (expensive operation)
+      // For non-candidates, skip - they don't have accountHistory so conviction will return no_history
+      let historicalState: SignalContext['historicalState'];
+      if (accountHistory) {
+        const tradeTimestamp = Math.floor(trade.timestamp.getTime() / 1000);
+        historicalState = this.tradeDb.getAccountStateAt(trade.wallet, tradeTimestamp);
+      }
 
       // Final score with all context
       const fullContext: SignalContext = {
