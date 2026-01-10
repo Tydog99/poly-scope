@@ -473,5 +473,66 @@ describe('DB Integration', () => {
 
       expect(state.approximate).toBe(true);
     });
+
+    it('excludes fills at the exact query timestamp (exclusive before)', () => {
+      // This tests that getAccountStateAt uses < not <= for timestamp
+      // We want the state BEFORE the trade, not including it
+      db.saveFills([
+        {
+          id: 'fill-before',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell',
+          size: 1000000000, // $1000
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+        {
+          id: 'fill-at-query-time',
+          transactionHash: '0xtx2',
+          timestamp: 2000, // Exactly at query timestamp
+          orderHash: '0xo2',
+          side: 'Sell',
+          size: 5000000000, // $5000
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+      ]);
+
+      // Query at timestamp 2000 - should NOT include the $5000 fill at t=2000
+      const state = db.getAccountStateAt('0xtrader', 2000);
+
+      expect(state.volume).toBe(1000000000); // Only $1000, not $6000
+      expect(state.tradeCount).toBe(1);
+    });
+
+    it('returns zero volume for first trade (no prior history)', () => {
+      // When a wallet makes their first trade, prior volume should be 0
+      db.saveFills([
+        {
+          id: 'first-trade',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell',
+          size: 5000000000, // $5000
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xnewwallet',
+          market: 'token-yes',
+        },
+      ]);
+
+      // Query at the trade's timestamp - should have 0 prior volume
+      const state = db.getAccountStateAt('0xnewwallet', 1000);
+
+      expect(state.volume).toBe(0);
+      expect(state.tradeCount).toBe(0);
+    });
   });
 });
