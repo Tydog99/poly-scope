@@ -180,7 +180,7 @@ export class TradeDB {
       params.push(options.after);
     }
     if (options.before !== undefined) {
-      sql += ' AND timestamp <= ?';
+      sql += ' AND timestamp < ?';
       params.push(options.before);
     }
 
@@ -230,7 +230,7 @@ export class TradeDB {
       params.push(options.after);
     }
     if (options.before !== undefined) {
-      sql += ' AND timestamp <= ?';
+      sql += ' AND timestamp < ?';
       params.push(options.before);
     }
 
