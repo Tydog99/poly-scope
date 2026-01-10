@@ -233,6 +233,11 @@ describe('TradeDB', () => {
     };
 
     beforeEach(() => {
+      // Save market metadata (required for proper volume aggregation)
+      tradeDb.saveMarkets([
+        { tokenId: 't1', conditionId: 'cond-1', question: 'Q1?', outcome: 'Yes', outcomeIndex: 0, resolvedAt: null },
+        { tokenId: 't2', conditionId: 'cond-2', question: 'Q2?', outcome: 'Yes', outcomeIndex: 0, resolvedAt: null },
+      ]);
       tradeDb.saveFills([
         { ...baseFill, id: 'fill-1', transactionHash: '0xa', timestamp: 1000, size: 50000000 },
         { ...baseFill, id: 'fill-2', transactionHash: '0xb', timestamp: 2000, size: 60000000 },

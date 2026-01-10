@@ -249,6 +249,12 @@ describe('DB Integration', () => {
         hasFullHistory: true,
       });
 
+      // Save market metadata (required for proper volume aggregation)
+      db.saveMarkets([
+        { tokenId: 'token-1', conditionId: 'cond-1', question: 'Q1?', outcome: 'Yes', outcomeIndex: 0, resolvedAt: null },
+        { tokenId: 'token-2', conditionId: 'cond-2', question: 'Q2?', outcome: 'Yes', outcomeIndex: 0, resolvedAt: null },
+      ]);
+
       // Save fills at different timestamps
       // Note: In the new model, each fill is stored once (not per-perspective)
       // The wallet participates as either maker or taker
@@ -316,6 +322,156 @@ describe('DB Integration', () => {
 
     it('marks as not approximate when full history available', () => {
       expect(db.getAccountStateAt('0xtrader', 2500).approximate).toBe(false);
+    });
+  });
+
+  describe('aggregated volume calculation', () => {
+    beforeEach(() => {
+      // Save market metadata with YES/NO outcomes for complementary trade detection
+      db.saveMarkets([
+        { tokenId: 'token-yes', conditionId: 'cond-1', question: 'Q?', outcome: 'Yes', outcomeIndex: 0, resolvedAt: null },
+        { tokenId: 'token-no', conditionId: 'cond-1', question: 'Q?', outcome: 'No', outcomeIndex: 1, resolvedAt: null },
+      ]);
+
+      db.saveAccount({
+        wallet: '0xtrader',
+        creationTimestamp: 500,
+        syncedFrom: 1000,
+        syncedTo: 5000,
+        syncedAt: Math.floor(Date.now() / 1000),
+        tradeCountTotal: 5,
+        collateralVolume: 500000000,
+        profit: 50000000,
+        hasFullHistory: true,
+      });
+    });
+
+    it('prevents double-counting when wallet is maker and taker in same tx', () => {
+      // Wallet appears as both maker (higher value) and taker (lower value) in same tx
+      db.saveFills([
+        {
+          id: 'fill-maker',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Buy',
+          size: 7000000000, // $7000 as maker (higher value)
+          price: 100000, // 0.1
+          maker: '0xtrader',
+          taker: '0xother',
+          market: 'token-yes',
+        },
+        {
+          id: 'fill-taker',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo2',
+          side: 'Sell',
+          size: 2000000000, // $2000 as taker (lower value)
+          price: 100000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+      ]);
+
+      const state = db.getAccountStateAt('0xtrader', 2000);
+
+      // Should only count the higher-value role ($7000), not both ($9000)
+      expect(state.volume).toBe(7000000000); // $7000 in 6 decimals
+      expect(state.tradeCount).toBe(1);
+    });
+
+    it('filters complementary trades in same transaction', () => {
+      // Wallet buys YES and NO in same tx (like a split operation)
+      db.saveFills([
+        {
+          id: 'fill-yes',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell', // Taker buys
+          size: 5000000000, // $5000 YES
+          price: 100000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+        {
+          id: 'fill-no',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo2',
+          side: 'Sell', // Taker buys
+          size: 500000000, // $500 NO (complementary, smaller)
+          price: 900000, // 0.9
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-no',
+        },
+      ]);
+
+      const state = db.getAccountStateAt('0xtrader', 2000);
+
+      // Should only count $5000 YES, not $5500 total (NO is complementary)
+      expect(state.volume).toBe(5000000000);
+      expect(state.tradeCount).toBe(1);
+    });
+
+    it('sums volume correctly across multiple transactions', () => {
+      db.saveFills([
+        {
+          id: 'fill-1',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell',
+          size: 1000000000, // $1000
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+        {
+          id: 'fill-2',
+          transactionHash: '0xtx2',
+          timestamp: 2000,
+          orderHash: '0xo2',
+          side: 'Sell',
+          size: 2000000000, // $2000
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-yes',
+        },
+      ]);
+
+      const state = db.getAccountStateAt('0xtrader', 3000);
+
+      expect(state.volume).toBe(3000000000); // $3000 total
+      expect(state.tradeCount).toBe(2);
+    });
+
+    it('marks as approximate when market metadata is missing', () => {
+      // Save a fill for a market that's not in the markets table
+      db.saveFills([
+        {
+          id: 'fill-unknown',
+          transactionHash: '0xtx1',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell',
+          size: 1000000000,
+          price: 500000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'unknown-token', // Not in markets table
+        },
+      ]);
+
+      const state = db.getAccountStateAt('0xtrader', 2000);
+
+      expect(state.approximate).toBe(true);
     });
   });
 });

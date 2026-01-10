@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { initializeSchema } from './schema.js';
+import { aggregateFills } from '../api/aggregator.js';
+import type { SubgraphTrade } from '../api/types.js';
 
 export interface DBStatus {
   path: string;
@@ -315,28 +317,99 @@ export class TradeDB {
       .run(wallet.toLowerCase());
   }
 
-  getAccountStateAt(wallet: string, atTimestamp: number): PointInTimeState {
-    const account = this.getAccount(wallet);
-    const approximate = !account || !account.hasFullHistory ||
-      (account.syncedFrom !== null && account.syncedFrom > atTimestamp);
-
+  /**
+   * Calculate aggregated volume for a wallet at a point in time.
+   * Uses proper aggregation logic to avoid double-counting:
+   * 1. Groups fills by txHash + outcome + role
+   * 2. When wallet is both maker and taker, picks higher value role
+   * 3. Filters complementary trades (YES + NO in same tx)
+   */
+  getAggregatedVolumeAt(wallet: string, atTimestamp: number): {
+    volume: number;
+    tradeCount: number;
+    marketsNotFound: string[];
+  } {
     const walletLower = wallet.toLowerCase();
 
-    // Count fills where wallet participated (as maker or taker)
-    const result = this.db.prepare(`
-      SELECT COUNT(*) as tradeCount,
-             COALESCE(SUM(size), 0) as volume
-      FROM enriched_order_fills
-      WHERE (maker = ? OR taker = ?) AND timestamp < ?
-    `).get(walletLower, walletLower, atTimestamp) as { tradeCount: number; volume: number };
+    // Step 1: Get all fills for this wallet before timestamp
+    const fills = this.getFillsForWallet(walletLower, {
+      before: atTimestamp,
+      role: 'both', // Need both to properly deduplicate
+    });
 
-    // P&L calculation needs to be done in application layer now
-    // since we need to know token outcome (YES/NO) to determine profit
+    if (fills.length === 0) {
+      return { volume: 0, tradeCount: 0, marketsNotFound: [] };
+    }
+
+    // Step 2: Get unique token IDs from fills
+    const tokenIds = [...new Set(fills.map(f => f.market))];
+
+    // Step 3: Load market metadata from DB
+    const markets = this.getMarketsForTokenIds(tokenIds);
+
+    // Step 4: Build tokenToOutcome map
+    const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
+    const marketsNotFound: string[] = [];
+
+    for (const tokenId of tokenIds) {
+      const market = markets.get(tokenId);
+      if (market && market.outcome) {
+        tokenToOutcome.set(tokenId.toLowerCase(),
+          market.outcome.toUpperCase() === 'YES' ? 'YES' : 'NO');
+      } else {
+        marketsNotFound.push(tokenId);
+        // Default to YES if market not found (graceful degradation)
+        tokenToOutcome.set(tokenId.toLowerCase(), 'YES');
+      }
+    }
+
+    // Step 5: Convert DBEnrichedOrderFill to SubgraphTrade format
+    const subgraphFills: SubgraphTrade[] = fills.map(f => ({
+      id: f.id,
+      transactionHash: f.transactionHash,
+      timestamp: f.timestamp,
+      maker: f.maker,
+      taker: f.taker,
+      marketId: f.market,
+      side: f.side,
+      size: f.size.toString(), // Already in 6 decimals, aggregator does parseFloat/1e6
+      price: (f.price / 1e6).toString(), // Convert from integer to decimal string
+    }));
+
+    // Step 6: Aggregate fills properly
+    const aggregatedTrades = aggregateFills(subgraphFills, {
+      wallet: walletLower,
+      tokenToOutcome,
+    });
+
+    // Step 7: Sum totalValueUsd from aggregated trades
+    const volume = aggregatedTrades.reduce((sum, t) => sum + t.totalValueUsd, 0);
+
     return {
-      tradeCount: result.tradeCount,
-      volume: result.volume,
+      volume,
+      tradeCount: aggregatedTrades.length,
+      marketsNotFound,
+    };
+  }
+
+  getAccountStateAt(wallet: string, atTimestamp: number): PointInTimeState {
+    const account = this.getAccount(wallet);
+    const hasIncompleteHistory = !account || !account.hasFullHistory ||
+      (account.syncedFrom !== null && account.syncedFrom > atTimestamp);
+
+    // Use aggregated volume calculation instead of naive SUM(size)
+    const { volume, tradeCount, marketsNotFound } = this.getAggregatedVolumeAt(wallet, atTimestamp);
+
+    // Log warning if some markets weren't found (affects accuracy)
+    if (marketsNotFound.length > 0 && process.env.DEBUG) {
+      console.warn(`getAccountStateAt: ${marketsNotFound.length} market(s) not in DB for wallet ${wallet.slice(0, 10)}`);
+    }
+
+    return {
+      tradeCount,
+      volume: Math.round(volume * 1e6), // Convert back to 6 decimals for compatibility
       pnl: 0, // TODO: Requires market resolution data to compute
-      approximate,
+      approximate: hasIncompleteHistory || marketsNotFound.length > 0,
     };
   }
 
@@ -391,6 +464,22 @@ export class TradeDB {
       FROM markets WHERE token_id = ?
     `).get(tokenId) as DBMarket | undefined;
     return row ?? null;
+  }
+
+  getMarketsForTokenIds(tokenIds: string[]): Map<string, DBMarket> {
+    const result = new Map<string, DBMarket>();
+    if (tokenIds.length === 0) return result;
+
+    const placeholders = tokenIds.map(() => '?').join(',');
+    const rows = this.db.prepare(`
+      SELECT token_id as tokenId, condition_id as conditionId, question, outcome, outcome_index as outcomeIndex, resolved_at as resolvedAt
+      FROM markets WHERE token_id IN (${placeholders})
+    `).all(...tokenIds) as DBMarket[];
+
+    for (const row of rows) {
+      result.set(row.tokenId, row);
+    }
+    return result;
   }
 
   getMarketSync(tokenId: string): DBMarketSync | null {
