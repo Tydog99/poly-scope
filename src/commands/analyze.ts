@@ -9,7 +9,7 @@ import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
 import { getMarketResolver, saveResolvedMarketsToDb } from '../api/market-resolver.js';
 import { aggregateFills } from '../api/aggregator.js';
-import type { Market, SubgraphTrade, MarketToken } from '../api/types.js';
+import type { Market, SubgraphTrade, MarketToken, AggregatedTrade } from '../api/types.js';
 import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
 import { TradeDB, type DBEnrichedOrderFill } from '../db/index.js';
 import { TradeCacheChecker, type FetchReason } from '../api/trade-cache.js';
@@ -283,6 +283,50 @@ export class AnalyzeCommand {
       console.log(`Phase 2: No candidate wallets to fetch`);
     }
 
+    // === PRE-COMPUTE: Build aggregated trade cache for candidate wallets ===
+    // This avoids O(n) expensive getAccountStateAt calls per trade
+    const walletTradeCache = new Map<string, AggregatedTrade[]>();
+    const walletsToCache = options.wallet && targetAccountHistory
+      ? [options.wallet.toLowerCase()]
+      : [...candidateWallets];
+
+    if (walletsToCache.length > 0) {
+      console.log(`  Pre-computing trade histories for ${walletsToCache.length} candidates...`);
+      for (const wallet of walletsToCache) {
+        const fills = this.tradeDb.getFillsForWallet(wallet, { role: 'both' });
+        if (fills.length === 0) continue;
+
+        // Get market metadata
+        const tokenIds = [...new Set(fills.map(f => f.market))];
+        const markets = this.tradeDb.getMarketsForTokenIds(tokenIds);
+
+        // Build tokenToOutcome map
+        const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
+        for (const tokenId of tokenIds) {
+          const market = markets.get(tokenId);
+          tokenToOutcome.set(tokenId.toLowerCase(),
+            market?.outcome?.toUpperCase() === 'YES' ? 'YES' : 'NO');
+        }
+
+        // Convert to SubgraphTrade format
+        const subgraphFills: SubgraphTrade[] = fills.map(f => ({
+          id: f.id,
+          transactionHash: f.transactionHash,
+          timestamp: f.timestamp,
+          maker: f.maker,
+          taker: f.taker,
+          marketId: f.market,
+          side: f.side,
+          size: f.size.toString(),
+          price: (f.price / 1e6).toString(),
+        }));
+
+        // Aggregate once for this wallet
+        const aggregated = aggregateFills(subgraphFills, { wallet, tokenToOutcome });
+        walletTradeCache.set(wallet, aggregated);
+      }
+    }
+
     // === PHASE 3: Final scoring with account data ===
     console.log(`Phase 3: Final scoring with account histories...`);
 
@@ -300,12 +344,21 @@ export class AnalyzeCommand {
         ? targetAccountHistory
         : accountHistories.get(trade.wallet.toLowerCase());
 
-      // Only compute historicalState for candidate wallets (expensive operation)
-      // For non-candidates, skip - they don't have accountHistory so conviction will return no_history
+      // Get point-in-time volume from pre-computed cache (fast O(n) filter instead of O(n) DB queries)
       let historicalState: SignalContext['historicalState'];
       if (accountHistory) {
-        const tradeTimestamp = Math.floor(trade.timestamp.getTime() / 1000);
-        historicalState = this.tradeDb.getAccountStateAt(trade.wallet, tradeTimestamp);
+        const cachedTrades = walletTradeCache.get(trade.wallet.toLowerCase());
+        if (cachedTrades) {
+          const tradeTimestamp = trade.timestamp.getTime() / 1000;
+          const priorTrades = cachedTrades.filter(t => t.timestamp.getTime() / 1000 < tradeTimestamp);
+          const priorVolume = priorTrades.reduce((sum, t) => sum + t.totalValueUsd, 0);
+          historicalState = {
+            tradeCount: priorTrades.length,
+            volume: Math.round(priorVolume * 1e6),
+            pnl: 0,
+            approximate: false,
+          };
+        }
       }
 
       // Final score with all context
