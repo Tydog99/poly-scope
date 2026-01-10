@@ -5,6 +5,7 @@ import type { SuspiciousTrade } from '../output/types.js';
 import { aggregateFills } from '../api/aggregator.js';
 import type { Signal } from '../signals/types.js';
 import type { SignalAggregator } from '../signals/aggregator.js';
+import type { TradeDB } from '../db/index.js';
 
 /**
  * Build a tokenId -> outcome mapping from market tokens
@@ -79,10 +80,23 @@ export async function scoreTrade(
   trade: Trade,
   signals: Signal[],
   aggregator: SignalAggregator,
-  context: SignalContext
+  context: SignalContext,
+  tradeDb?: TradeDB
 ): Promise<SuspiciousTrade | null> {
+  // Get point-in-time historical state from DB if available
+  let historicalState = context.historicalState;
+  if (tradeDb && !historicalState) {
+    const tradeTimestamp = Math.floor(trade.timestamp.getTime() / 1000);
+    historicalState = tradeDb.getAccountStateAt(trade.wallet, tradeTimestamp);
+  }
+
+  const fullContext: SignalContext = {
+    ...context,
+    historicalState,
+  };
+
   const results = await Promise.all(
-    signals.map(s => s.calculate(trade, context))
+    signals.map(s => s.calculate(trade, fullContext))
   );
   const score = aggregator.aggregate(results);
 
@@ -108,9 +122,10 @@ export async function scoreTrades(
   options?: {
     onProgress?: (current: number, total: number) => void;
     progressInterval?: number;
+    tradeDb?: TradeDB;
   }
 ): Promise<SuspiciousTrade[]> {
-  const { onProgress, progressInterval = 500 } = options ?? {};
+  const { onProgress, progressInterval = 500, tradeDb } = options ?? {};
   const results: SuspiciousTrade[] = [];
 
   for (let i = 0; i < trades.length; i++) {
@@ -118,7 +133,7 @@ export async function scoreTrades(
       onProgress(i + 1, trades.length);
     }
 
-    const scored = await scoreTrade(trades[i], signals, aggregator, context);
+    const scored = await scoreTrade(trades[i], signals, aggregator, context, tradeDb);
     if (scored) {
       results.push(scored);
     }

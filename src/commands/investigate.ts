@@ -230,7 +230,8 @@ export class InvestigateCommand {
         aggregatedTrades,
         this.signals,
         this.aggregator,
-        context
+        context,
+        { tradeDb: this.tradeDb }
       );
 
       // Sort by score descending
@@ -243,8 +244,11 @@ export class InvestigateCommand {
     // Calculate market-specific summary if filtering by market
     let marketSummary: MarketSummary | undefined;
     if (marketName) {
-      // Calculate volume from trades (size field is already in USD with 6 decimals)
-      const volumeUsd = recentTrades.reduce((sum, t) => sum + parseFloat(t.size) / 1e6, 0);
+      // Calculate volume from aggregated trades (properly deduplicated)
+      // Use aggregatedTrades if available, otherwise fall back to raw fills
+      const volumeUsd = aggregatedTrades
+        ? aggregatedTrades.reduce((sum, t) => sum + t.totalValueUsd, 0)
+        : recentTrades.reduce((sum, t) => sum + parseFloat(t.size) / 1e6, 0);
 
       // Calculate position value from filtered positions
       const positionValueUsd = positions.reduce((sum, p) => {

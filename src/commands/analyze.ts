@@ -300,10 +300,15 @@ export class AnalyzeCommand {
         ? targetAccountHistory
         : accountHistories.get(trade.wallet.toLowerCase());
 
+      // Get point-in-time historical state from DB (properly aggregated volume)
+      const tradeTimestamp = Math.floor(trade.timestamp.getTime() / 1000);
+      const historicalState = this.tradeDb.getAccountStateAt(trade.wallet, tradeTimestamp);
+
       // Final score with all context
       const fullContext: SignalContext = {
         config: this.config,
         accountHistory,
+        historicalState,
       };
       const fullResults = await Promise.all(
         this.signals.map(s => s.calculate(trade, fullContext))
