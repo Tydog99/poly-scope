@@ -26,7 +26,7 @@ describe('Database Schema', () => {
 
     const tableNames = tables.map(t => t.name);
 
-    expect(tableNames).toContain('trades');
+    expect(tableNames).toContain('enriched_order_fills');  // Changed from 'trades'
     expect(tableNames).toContain('accounts');
     expect(tableNames).toContain('redemptions');
     expect(tableNames).toContain('markets');
@@ -43,8 +43,10 @@ describe('Database Schema', () => {
 
     const indexNames = indexes.map(i => i.name);
 
-    expect(indexNames).toContain('idx_trades_wallet_time');
-    expect(indexNames).toContain('idx_trades_market');
+    expect(indexNames).toContain('idx_fills_maker_time');
+    expect(indexNames).toContain('idx_fills_taker_time');
+    expect(indexNames).toContain('idx_fills_market');
+    expect(indexNames).toContain('idx_fills_tx');
     expect(indexNames).toContain('idx_redemptions_wallet');
   });
 

@@ -11,7 +11,7 @@ import { getMarketResolver, saveResolvedMarketsToDb } from '../api/market-resolv
 import { aggregateFills } from '../api/aggregator.js';
 import type { Market, SubgraphTrade, MarketToken } from '../api/types.js';
 import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
-import { TradeDB, type DBTrade } from '../db/index.js';
+import { TradeDB, type DBEnrichedOrderFill } from '../db/index.js';
 import { TradeCacheChecker, type FetchReason } from '../api/trade-cache.js';
 
 export interface AnalyzeOptions {
@@ -427,19 +427,19 @@ export class AnalyzeCommand {
           });
         }
       } else {
-        const cachedCount = this.tradeDb.getTradesForMarket(token.tokenId, { role: 'taker' }).length;
-        console.log(`Using cached ${token.outcome} trades (${cachedCount} taker fills)`);
+        const cachedCount = this.tradeDb.getFillsForMarket(token.tokenId).length;
+        console.log(`Using cached ${token.outcome} trades (${cachedCount} fills)`);
       }
 
       // Read from DB (includes both cached and newly saved)
-      const dbTrades = this.tradeDb.getTradesForMarket(token.tokenId, {
+      const dbFills = this.tradeDb.getFillsForMarket(token.tokenId, {
         after: requestedRange.after,
         before: requestedRange.before,
         limit: perTokenLimit,
       });
 
-      // Convert DBTrade back to SubgraphTrade format for aggregation
-      const fills = this.convertDBTradesToSubgraph(dbTrades, token.tokenId);
+      // Convert DBEnrichedOrderFill back to SubgraphTrade format for aggregation
+      const fills = this.convertDBFillsToSubgraph(dbFills);
       allFills.push(...fills);
     }
 
@@ -484,95 +484,40 @@ export class AnalyzeCommand {
   }
 
   /**
-   * Save SubgraphTrade fills to DB (both maker and taker perspectives)
+   * Save SubgraphTrade fills to DB (one row per fill)
    */
   private saveTradesFromFills(fills: SubgraphTrade[]): number {
-    const dbTrades: DBTrade[] = [];
+    const dbFills: DBEnrichedOrderFill[] = fills.map(fill => ({
+      id: fill.id,
+      transactionHash: fill.transactionHash,
+      timestamp: fill.timestamp,
+      orderHash: (fill as any).orderHash ?? fill.id, // Use id as fallback if orderHash missing
+      side: fill.side,
+      size: parseInt(fill.size),
+      price: Math.round(parseFloat(fill.price) * 1e6),
+      maker: fill.maker.toLowerCase(),
+      taker: fill.taker.toLowerCase(),
+      market: fill.marketId,
+    }));
 
-    for (const fill of fills) {
-      const sizeNum = parseInt(fill.size); // USD value in 6 decimals
-      const priceRaw = parseFloat(fill.price); // 0-1 decimal (e.g., 0.22)
-      const priceNum = Math.round(priceRaw * 1e6); // Convert to 6 decimal integer
-      const valueUsd = sizeNum; // In subgraph, size IS the USD value
-
-      // Store maker's perspective
-      dbTrades.push({
-        id: `${fill.id}-maker`,
-        txHash: fill.transactionHash,
-        wallet: fill.maker.toLowerCase(),
-        marketId: fill.marketId,
-        timestamp: fill.timestamp,
-        side: fill.side,
-        action: fill.side === 'Buy' ? 'BUY' : 'SELL', // Maker's action matches side
-        role: 'maker',
-        size: sizeNum,
-        price: priceNum,
-        valueUsd,
-      });
-
-      // Store taker's perspective
-      dbTrades.push({
-        id: `${fill.id}-taker`,
-        txHash: fill.transactionHash,
-        wallet: fill.taker.toLowerCase(),
-        marketId: fill.marketId,
-        timestamp: fill.timestamp,
-        side: fill.side,
-        action: fill.side === 'Buy' ? 'SELL' : 'BUY', // Taker's action is opposite of side
-        role: 'taker',
-        size: sizeNum,
-        price: priceNum,
-        valueUsd,
-      });
-    }
-
-    return this.tradeDb.saveTrades(dbTrades);
+    return this.tradeDb.saveFills(dbFills);
   }
 
   /**
-   * Convert DBTrade records back to SubgraphTrade format for aggregation.
-   * Groups by fill ID (strips -maker/-taker suffix) to reconstruct original fills.
+   * Convert DBEnrichedOrderFill records back to SubgraphTrade format for aggregation
    */
-  private convertDBTradesToSubgraph(dbTrades: DBTrade[], tokenId: string): SubgraphTrade[] {
-    // Group trades by original fill ID (before -maker/-taker suffix)
-    const fillMap = new Map<string, { maker?: DBTrade; taker?: DBTrade }>();
-
-    for (const trade of dbTrades) {
-      // Extract original fill ID (remove -maker or -taker suffix)
-      const originalId = trade.id.replace(/-maker$/, '').replace(/-taker$/, '');
-
-      if (!fillMap.has(originalId)) {
-        fillMap.set(originalId, {});
-      }
-      const entry = fillMap.get(originalId)!;
-
-      if (trade.role === 'maker') {
-        entry.maker = trade;
-      } else {
-        entry.taker = trade;
-      }
-    }
-
-    // Convert to SubgraphTrade format
-    const fills: SubgraphTrade[] = [];
-
-    for (const [fillId, { maker, taker }] of fillMap) {
-      // Need both maker and taker to reconstruct the fill
-      if (!maker || !taker) continue;
-
-      fills.push({
-        id: fillId,
-        transactionHash: maker.txHash,
-        timestamp: maker.timestamp,
-        maker: maker.wallet,
-        taker: taker.wallet,
-        marketId: tokenId,
-        side: maker.side as 'Buy' | 'Sell',
-        size: maker.size.toString(),
-        price: maker.price.toString(),
-      });
-    }
-
-    return fills;
+  private convertDBFillsToSubgraph(dbFills: DBEnrichedOrderFill[]): SubgraphTrade[] {
+    return dbFills.map(f => ({
+      id: f.id,
+      transactionHash: f.transactionHash,
+      timestamp: f.timestamp,
+      orderHash: f.orderHash,
+      maker: f.maker,
+      taker: f.taker,
+      marketId: f.market,
+      side: f.side,
+      size: f.size.toString(),
+      price: (f.price / 1e6).toString(), // Convert back to decimal string
+    }));
   }
 }

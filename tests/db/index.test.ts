@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { TradeDB } from '../../src/db/index.js';
+import { TradeDB, DBEnrichedOrderFill } from '../../src/db/index.js';
 import { unlinkSync, existsSync, rmSync } from 'fs';
 
 describe('TradeDB', () => {
@@ -39,7 +39,7 @@ describe('TradeDB', () => {
 
       expect(status).toEqual({
         path: testDbPath,
-        trades: 0,
+        fills: 0,
         accounts: 0,
         redemptions: 0,
         markets: 0,
@@ -48,137 +48,119 @@ describe('TradeDB', () => {
     });
   });
 
-  describe('trades', () => {
-    const mockTrade = {
+  describe('fills', () => {
+    const mockFill: DBEnrichedOrderFill = {
       id: 'fill-123',
-      txHash: '0xabc',
-      wallet: '0x123',
-      marketId: 'token-456',
+      transactionHash: '0xabc',
       timestamp: 1704067200,
+      orderHash: '0xorder123',
       side: 'Buy',
-      action: 'BUY',
-      role: 'taker',
       size: 1000000000,
       price: 500000,
-      valueUsd: 500000000,
+      maker: '0xMaker',
+      taker: '0xTaker',
+      market: 'token-456',
     };
 
-    it('saves a single trade', () => {
-      const inserted = tradeDb.saveTrades([mockTrade]);
+    it('saves a single fill', () => {
+      const inserted = tradeDb.saveFills([mockFill]);
       expect(inserted).toBe(1);
-      expect(tradeDb.getStatus().trades).toBe(1);
+      expect(tradeDb.getStatus().fills).toBe(1);
     });
 
-    it('is idempotent - saving same trade twice inserts once', () => {
-      tradeDb.saveTrades([mockTrade]);
-      const inserted = tradeDb.saveTrades([mockTrade]);
+    it('is idempotent - saving same fill twice inserts once', () => {
+      tradeDb.saveFills([mockFill]);
+      const inserted = tradeDb.saveFills([mockFill]);
       expect(inserted).toBe(0);
-      expect(tradeDb.getStatus().trades).toBe(1);
+      expect(tradeDb.getStatus().fills).toBe(1);
     });
 
-    it('saves multiple trades in a transaction', () => {
-      const trades = [
-        mockTrade,
-        { ...mockTrade, id: 'fill-124', timestamp: 1704067300 },
-        { ...mockTrade, id: 'fill-125', timestamp: 1704067400 },
+    it('saves multiple fills in a transaction', () => {
+      const fills = [
+        mockFill,
+        { ...mockFill, id: 'fill-124', timestamp: 1704067300 },
+        { ...mockFill, id: 'fill-125', timestamp: 1704067400 },
       ];
-      const inserted = tradeDb.saveTrades(trades);
+      const inserted = tradeDb.saveFills(fills);
       expect(inserted).toBe(3);
     });
 
-    it('retrieves trades for a wallet', () => {
-      tradeDb.saveTrades([
-        mockTrade,
-        { ...mockTrade, id: 'fill-124', wallet: '0x456' },
+    it('retrieves fills where wallet is maker', () => {
+      tradeDb.saveFills([
+        mockFill,
+        { ...mockFill, id: 'fill-124', maker: '0xOther', taker: '0xTaker' },
       ]);
-      const trades = tradeDb.getTradesForWallet('0x123');
-      expect(trades).toHaveLength(1);
-      expect(trades[0].id).toBe('fill-123');
+      const fills = tradeDb.getFillsForWallet('0xMaker', { role: 'maker' });
+      expect(fills).toHaveLength(1);
+      expect(fills[0].id).toBe('fill-123');
     });
 
-    it('retrieves trades before a timestamp', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', timestamp: 1000 },
-        { ...mockTrade, id: 'fill-2', timestamp: 2000 },
-        { ...mockTrade, id: 'fill-3', timestamp: 3000 },
+    it('retrieves fills where wallet is taker', () => {
+      tradeDb.saveFills([
+        mockFill,
+        { ...mockFill, id: 'fill-124', maker: '0xMaker', taker: '0xOther' },
       ]);
-      const trades = tradeDb.getTradesForWallet('0x123', { before: 2500 });
-      expect(trades).toHaveLength(2);
-      expect(trades.map(t => t.id)).toEqual(['fill-2', 'fill-1']);
+      const fills = tradeDb.getFillsForWallet('0xTaker', { role: 'taker' });
+      expect(fills).toHaveLength(1);
+      expect(fills[0].id).toBe('fill-123');
     });
 
-    it('retrieves trades for a market', () => {
-      tradeDb.saveTrades([
-        mockTrade,
-        { ...mockTrade, id: 'fill-124', marketId: 'token-789' },
+    it('retrieves fills where wallet is either maker or taker', () => {
+      tradeDb.saveFills([
+        { ...mockFill, id: 'fill-1', maker: '0xAlice', taker: '0xBob' },
+        { ...mockFill, id: 'fill-2', maker: '0xBob', taker: '0xCharlie' },
+        { ...mockFill, id: 'fill-3', maker: '0xCharlie', taker: '0xAlice' },
       ]);
-      const trades = tradeDb.getTradesForMarket('token-456');
-      expect(trades).toHaveLength(1);
+      const fills = tradeDb.getFillsForWallet('0xAlice', { role: 'both' });
+      expect(fills).toHaveLength(2);
     });
 
-    it('retrieves trades for a market with after filter', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', timestamp: 1000 },
-        { ...mockTrade, id: 'fill-2', timestamp: 2000 },
-        { ...mockTrade, id: 'fill-3', timestamp: 3000 },
+    it('retrieves fills before a timestamp', () => {
+      tradeDb.saveFills([
+        { ...mockFill, id: 'fill-1', timestamp: 1000 },
+        { ...mockFill, id: 'fill-2', timestamp: 2000 },
+        { ...mockFill, id: 'fill-3', timestamp: 3000 },
       ]);
-      const trades = tradeDb.getTradesForMarket('token-456', { after: 1500 });
-      expect(trades).toHaveLength(2);
-      expect(trades.map(t => t.id)).toEqual(['fill-3', 'fill-2']);
+      const fills = tradeDb.getFillsForWallet('0xMaker', { before: 2500, role: 'maker' });
+      expect(fills).toHaveLength(2);
+      expect(fills.map(f => f.id)).toEqual(['fill-2', 'fill-1']);
     });
 
-    it('retrieves trades for a market with before filter', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', timestamp: 1000 },
-        { ...mockTrade, id: 'fill-2', timestamp: 2000 },
-        { ...mockTrade, id: 'fill-3', timestamp: 3000 },
+    it('retrieves fills for a market', () => {
+      tradeDb.saveFills([
+        mockFill,
+        { ...mockFill, id: 'fill-124', market: 'token-789' },
       ]);
-      const trades = tradeDb.getTradesForMarket('token-456', { before: 2500 });
-      expect(trades).toHaveLength(2);
-      expect(trades.map(t => t.id)).toEqual(['fill-2', 'fill-1']);
+      const fills = tradeDb.getFillsForMarket('token-456');
+      expect(fills).toHaveLength(1);
     });
 
-    it('retrieves trades for a market with role filter', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', role: 'maker' },
-        { ...mockTrade, id: 'fill-2', role: 'taker' },
-        { ...mockTrade, id: 'fill-3', role: 'taker' },
+    it('retrieves fills for a market with after filter', () => {
+      tradeDb.saveFills([
+        { ...mockFill, id: 'fill-1', timestamp: 1000 },
+        { ...mockFill, id: 'fill-2', timestamp: 2000 },
+        { ...mockFill, id: 'fill-3', timestamp: 3000 },
       ]);
-      const takerTrades = tradeDb.getTradesForMarket('token-456', { role: 'taker' });
-      expect(takerTrades).toHaveLength(2);
-
-      const makerTrades = tradeDb.getTradesForMarket('token-456', { role: 'maker' });
-      expect(makerTrades).toHaveLength(1);
-
-      const bothTrades = tradeDb.getTradesForMarket('token-456', { role: 'both' });
-      expect(bothTrades).toHaveLength(3);
+      const fills = tradeDb.getFillsForMarket('token-456', { after: 1500 });
+      expect(fills).toHaveLength(2);
+      expect(fills.map(f => f.id)).toEqual(['fill-3', 'fill-2']);
     });
 
-    it('retrieves trades for a market with limit', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', timestamp: 1000 },
-        { ...mockTrade, id: 'fill-2', timestamp: 2000 },
-        { ...mockTrade, id: 'fill-3', timestamp: 3000 },
+    it('retrieves fills for a market with limit', () => {
+      tradeDb.saveFills([
+        { ...mockFill, id: 'fill-1', timestamp: 1000 },
+        { ...mockFill, id: 'fill-2', timestamp: 2000 },
+        { ...mockFill, id: 'fill-3', timestamp: 3000 },
       ]);
-      const trades = tradeDb.getTradesForMarket('token-456', { limit: 2 });
-      expect(trades).toHaveLength(2);
-      expect(trades.map(t => t.id)).toEqual(['fill-3', 'fill-2']);
+      const fills = tradeDb.getFillsForMarket('token-456', { limit: 2 });
+      expect(fills).toHaveLength(2);
+      expect(fills.map(f => f.id)).toEqual(['fill-3', 'fill-2']);
     });
 
-    it('combines multiple filters', () => {
-      tradeDb.saveTrades([
-        { ...mockTrade, id: 'fill-1', timestamp: 1000, role: 'maker' },
-        { ...mockTrade, id: 'fill-2', timestamp: 2000, role: 'taker' },
-        { ...mockTrade, id: 'fill-3', timestamp: 3000, role: 'taker' },
-        { ...mockTrade, id: 'fill-4', timestamp: 4000, role: 'maker' },
-      ]);
-      const trades = tradeDb.getTradesForMarket('token-456', {
-        after: 1500,
-        before: 3500,
-        role: 'taker',
-      });
-      expect(trades).toHaveLength(2);
-      expect(trades.map(t => t.id)).toEqual(['fill-3', 'fill-2']);
+    it('normalizes wallet addresses to lowercase', () => {
+      tradeDb.saveFills([mockFill]);
+      const fills = tradeDb.getFillsForWallet('0xMAKER', { role: 'maker' });
+      expect(fills).toHaveLength(1);
     });
   });
 
@@ -237,14 +219,24 @@ describe('TradeDB', () => {
   });
 
   describe('point-in-time queries', () => {
+    const baseFill: DBEnrichedOrderFill = {
+      id: '',
+      transactionHash: '',
+      timestamp: 0,
+      orderHash: '0xorder',
+      side: 'Buy',
+      size: 0,
+      price: 500000,
+      maker: '0xmaker',
+      taker: '0x123',
+      market: 't1',
+    };
+
     beforeEach(() => {
-      tradeDb.saveTrades([
-        { id: 'fill-1', txHash: '0xa', wallet: '0x123', marketId: 't1', timestamp: 1000,
-          side: 'Buy', action: 'BUY', role: 'taker', size: 100000000, price: 500000, valueUsd: 50000000 },
-        { id: 'fill-2', txHash: '0xb', wallet: '0x123', marketId: 't1', timestamp: 2000,
-          side: 'Sell', action: 'SELL', role: 'taker', size: 100000000, price: 600000, valueUsd: 60000000 },
-        { id: 'fill-3', txHash: '0xc', wallet: '0x123', marketId: 't2', timestamp: 3000,
-          side: 'Buy', action: 'BUY', role: 'taker', size: 200000000, price: 400000, valueUsd: 80000000 },
+      tradeDb.saveFills([
+        { ...baseFill, id: 'fill-1', transactionHash: '0xa', timestamp: 1000, size: 50000000 },
+        { ...baseFill, id: 'fill-2', transactionHash: '0xb', timestamp: 2000, size: 60000000 },
+        { ...baseFill, id: 'fill-3', transactionHash: '0xc', timestamp: 3000, size: 80000000, market: 't2' },
       ]);
       tradeDb.saveAccount({
         wallet: '0x123', creationTimestamp: 500, syncedFrom: 1000, syncedTo: 3000,
@@ -273,8 +265,9 @@ describe('TradeDB', () => {
       expect(state.volume).toBe(0);
     });
 
-    it('calculates P&L (sells - buys)', () => {
-      expect(tradeDb.getAccountStateAt('0x123', 2500).pnl).toBe(10000000);
+    it('returns pnl as 0 (requires market resolution data)', () => {
+      // P&L calculation now requires market resolution data
+      expect(tradeDb.getAccountStateAt('0x123', 2500).pnl).toBe(0);
     });
 
     it('marks as approximate when data is incomplete', () => {

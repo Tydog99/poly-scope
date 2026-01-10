@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export function initializeSchema(db: Database.Database): void {
   // Enable WAL mode for better concurrency
@@ -14,19 +14,18 @@ export function initializeSchema(db: Database.Database): void {
       applied_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
     );
 
-    -- Core trade data (one row per fill)
-    CREATE TABLE IF NOT EXISTS trades (
+    -- Raw subgraph fills (one row per EnrichedOrderFilled)
+    CREATE TABLE IF NOT EXISTS enriched_order_fills (
       id TEXT PRIMARY KEY,
-      tx_hash TEXT NOT NULL,
-      wallet TEXT NOT NULL,
-      market_id TEXT NOT NULL,
+      transaction_hash TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
+      order_hash TEXT NOT NULL,
       side TEXT NOT NULL,
-      action TEXT NOT NULL,
-      role TEXT NOT NULL,
       size INTEGER NOT NULL,
       price INTEGER NOT NULL,
-      value_usd INTEGER NOT NULL
+      maker TEXT NOT NULL,
+      taker TEXT NOT NULL,
+      market TEXT NOT NULL
     );
 
     -- Wallet metadata
@@ -75,8 +74,10 @@ export function initializeSchema(db: Database.Database): void {
     );
 
     -- Indexes for fast queries
-    CREATE INDEX IF NOT EXISTS idx_trades_wallet_time ON trades(wallet, timestamp);
-    CREATE INDEX IF NOT EXISTS idx_trades_market ON trades(market_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_fills_maker_time ON enriched_order_fills(maker, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_fills_taker_time ON enriched_order_fills(taker, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_fills_market ON enriched_order_fills(market, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_fills_tx ON enriched_order_fills(transaction_hash);
     CREATE INDEX IF NOT EXISTS idx_redemptions_wallet ON redemptions(wallet);
   `);
 

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { TradeDB, DBTrade, DBRedemption } from './index.js';
+import type { TradeDB, DBEnrichedOrderFill, DBRedemption } from './index.js';
 
 export interface MigrationResult {
   trades: number;
@@ -76,42 +76,42 @@ export function importJsonCaches(db: TradeDB, cacheDir: string = '.cache'): Migr
         // Detect format: new aggregated (has fills array) vs old flat (no fills)
         const isAggregatedFormat = rawTrades.length > 0 && Array.isArray(rawTrades[0].fills);
 
-        let trades: DBTrade[];
+        let fills: DBEnrichedOrderFill[];
         if (isAggregatedFormat) {
           // New format: flatten fills from aggregated trades
-          trades = rawTrades.flatMap((t: JsonTradeAggregated) =>
+          fills = rawTrades.flatMap((t: JsonTradeAggregated) =>
             t.fills.map(f => ({
               id: f.id,
-              txHash: t.transactionHash,
-              wallet: t.wallet,
-              marketId: t.marketId,
+              transactionHash: t.transactionHash,
               timestamp: Math.floor(new Date(f.timestamp).getTime() / 1000),
-              side: t.side,
-              action: t.action || (t.side === 'BUY' ? 'BUY' : 'SELL'),
-              role: t.role,
+              orderHash: '', // Not available in JSON cache
+              side: t.side === 'BUY' ? 'Buy' as const : 'Sell' as const,
               size: Math.round(f.size * 1e6),
               price: Math.round(f.price * 1e6),
-              valueUsd: Math.round(f.valueUsd * 1e6),
+              // Map wallet to maker/taker based on role
+              maker: t.role === 'maker' ? t.wallet : '',
+              taker: t.role === 'taker' ? t.wallet : '',
+              market: t.marketId,
             }))
           );
         } else {
           // Old flat format: each trade is already a fill
-          trades = rawTrades.map((t: JsonTradeFlat) => ({
+          fills = rawTrades.map((t: JsonTradeFlat) => ({
             id: t.id,
-            txHash: t.id.split('-')[0] || t.id, // Extract txHash from id if available
-            wallet: t.wallet,
-            marketId: t.marketId,
+            transactionHash: t.id.split('-')[0] || t.id, // Extract txHash from id if available
             timestamp: Math.floor(new Date(t.timestamp).getTime() / 1000),
-            side: t.side,
-            action: t.side === 'BUY' ? 'BUY' : 'SELL',
-            role: t.role,
+            orderHash: '', // Not available in JSON cache
+            side: t.side === 'BUY' ? 'Buy' as const : 'Sell' as const,
             size: Math.round(t.size * 1e6),
             price: Math.round(t.price * 1e6),
-            valueUsd: Math.round(t.valueUsd * 1e6),
+            // Map wallet to maker/taker based on role
+            maker: t.role === 'maker' ? t.wallet : '',
+            taker: t.role === 'taker' ? t.wallet : '',
+            market: t.marketId,
           }));
         }
 
-        result.trades += db.saveTrades(trades);
+        result.trades += db.saveFills(fills);
       } catch (e) {
         result.errors.push(`Failed to import ${file}: ${(e as Error).message}`);
       }
@@ -185,10 +185,11 @@ function countJsonRecords(dir: string, arrayKey?: string): number {
 }
 
 export function validateMigration(db: TradeDB, cacheDir: string = '.cache'): ValidationResult {
+  const status = db.getStatus();
   const dbCounts = {
-    trades: db.getStatus().trades,
-    accounts: db.getStatus().accounts,
-    redemptions: db.getStatus().redemptions,
+    trades: status.fills,  // Use fills count (trades renamed to fills)
+    accounts: status.accounts,
+    redemptions: status.redemptions,
   };
 
   // Count unique trade IDs across all files (trades can appear in multiple market files)

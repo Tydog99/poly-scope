@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { TradeDB } from '../../src/db/index.js';
+import { TradeDB, DBEnrichedOrderFill } from '../../src/db/index.js';
 import { unlinkSync, existsSync } from 'fs';
 
 describe('DB Integration', () => {
@@ -18,159 +18,84 @@ describe('DB Integration', () => {
     if (existsSync(`${testDbPath}-shm`)) unlinkSync(`${testDbPath}-shm`);
   });
 
-  describe('trade saving from subgraph fills', () => {
-    it('saves both maker and taker perspectives for each fill', () => {
-      // Simulate what analyze.ts does when saving trades
-      const fill = {
+  describe('fill saving from subgraph', () => {
+    it('saves one fill per EnrichedOrderFilled', () => {
+      const fill: DBEnrichedOrderFill = {
         id: 'fill-123',
         transactionHash: '0xabc',
         timestamp: 1704067200,
+        orderHash: '0xorder456',
+        side: 'Buy',
+        size: 1000000000,
+        price: 500000,
         maker: '0xMaker',
         taker: '0xTaker',
-        marketId: 'token-456',
-        side: 'Buy' as const,
-        size: '1000000000', // 1000 with 6 decimals
-        price: '500000', // 0.5 with 6 decimals
+        market: 'token-456',
       };
 
-      const sizeNum = parseInt(fill.size);
-      const priceNum = parseInt(fill.price);
-      const valueUsd = Math.round((sizeNum * priceNum) / 1e6);
+      const saved = db.saveFills([fill]);
 
-      const dbTrades = [
-        {
-          id: `${fill.id}-maker`,
-          txHash: fill.transactionHash,
-          wallet: fill.maker.toLowerCase(),
-          marketId: fill.marketId,
-          timestamp: fill.timestamp,
-          side: fill.side,
-          action: fill.side === 'Buy' ? 'BUY' : 'SELL',
-          role: 'maker',
-          size: sizeNum,
-          price: priceNum,
-          valueUsd,
-        },
-        {
-          id: `${fill.id}-taker`,
-          txHash: fill.transactionHash,
-          wallet: fill.taker.toLowerCase(),
-          marketId: fill.marketId,
-          timestamp: fill.timestamp,
-          side: fill.side,
-          action: fill.side === 'Buy' ? 'SELL' : 'BUY',
-          role: 'taker',
-          size: sizeNum,
-          price: priceNum,
-          valueUsd,
-        },
-      ];
-
-      const saved = db.saveTrades(dbTrades);
-
-      expect(saved).toBe(2);
-      expect(db.getStatus().trades).toBe(2);
+      expect(saved).toBe(1);
+      expect(db.getStatus().fills).toBe(1);
     });
 
-    it('uses composite IDs to avoid conflicts', () => {
-      const dbTrades = [
-        {
-          id: 'fill-123-maker',
-          txHash: '0xabc',
-          wallet: '0xmaker',
-          marketId: 'token-456',
-          timestamp: 1704067200,
-          side: 'Buy',
-          action: 'BUY',
-          role: 'maker',
-          size: 1000000000,
-          price: 500000,
-          valueUsd: 500000000,
-        },
-        {
-          id: 'fill-123-taker',
-          txHash: '0xabc',
-          wallet: '0xtaker',
-          marketId: 'token-456',
-          timestamp: 1704067200,
-          side: 'Buy',
-          action: 'SELL',
-          role: 'taker',
-          size: 1000000000,
-          price: 500000,
-          valueUsd: 500000000,
-        },
-      ];
+    it('does not duplicate fills', () => {
+      const fill: DBEnrichedOrderFill = {
+        id: 'fill-123',
+        transactionHash: '0xabc',
+        timestamp: 1704067200,
+        orderHash: '0xorder456',
+        side: 'Buy',
+        size: 1000000000,
+        price: 500000,
+        maker: '0xMaker',
+        taker: '0xTaker',
+        market: 'token-456',
+      };
 
-      // First save
-      db.saveTrades(dbTrades);
-      expect(db.getStatus().trades).toBe(2);
+      db.saveFills([fill]);
+      const secondSave = db.saveFills([fill]);
 
-      // Second save (idempotent)
-      const saved = db.saveTrades(dbTrades);
-      expect(saved).toBe(0); // No new inserts
-      expect(db.getStatus().trades).toBe(2);
+      expect(secondSave).toBe(0);
+      expect(db.getStatus().fills).toBe(1);
     });
 
-    it('calculates valueUsd correctly from size and price', () => {
-      // size: 1000 shares (1000000000 with 6 decimals)
-      // price: 0.5 (500000 with 6 decimals)
-      // valueUsd should be 500 (500000000 with 6 decimals)
-      const sizeNum = 1000000000;
-      const priceNum = 500000;
-      const valueUsd = Math.round((sizeNum * priceNum) / 1e6);
-
-      expect(valueUsd).toBe(500000000);
-    });
-
-    it('supports querying trades by wallet', () => {
-      db.saveTrades([
+    it('supports querying fills by wallet role', () => {
+      db.saveFills([
         {
-          id: 'fill-1-maker',
-          txHash: '0xabc',
-          wallet: '0xalice',
-          marketId: 'token-1',
+          id: 'fill-1',
+          transactionHash: '0xa',
           timestamp: 1000,
+          orderHash: '0xo1',
           side: 'Buy',
-          action: 'BUY',
-          role: 'maker',
-          size: 100000000,
+          size: 50000000,
           price: 500000,
-          valueUsd: 50000000,
+          maker: '0xalice',
+          taker: '0xbob',
+          market: 'token-1',
         },
         {
-          id: 'fill-1-taker',
-          txHash: '0xabc',
-          wallet: '0xbob',
-          marketId: 'token-1',
-          timestamp: 1000,
-          side: 'Buy',
-          action: 'SELL',
-          role: 'taker',
-          size: 100000000,
-          price: 500000,
-          valueUsd: 50000000,
-        },
-        {
-          id: 'fill-2-taker',
-          txHash: '0xdef',
-          wallet: '0xalice',
-          marketId: 'token-2',
+          id: 'fill-2',
+          transactionHash: '0xb',
           timestamp: 2000,
+          orderHash: '0xo2',
           side: 'Sell',
-          action: 'BUY',
-          role: 'taker',
-          size: 200000000,
+          size: 60000000,
           price: 600000,
-          valueUsd: 120000000,
+          maker: '0xbob',
+          taker: '0xcharlie',
+          market: 'token-1',
         },
       ]);
 
-      const aliceTrades = db.getTradesForWallet('0xalice');
-      expect(aliceTrades).toHaveLength(2);
+      const aliceMaker = db.getFillsForWallet('0xalice', { role: 'maker' });
+      expect(aliceMaker).toHaveLength(1);
 
-      const bobTrades = db.getTradesForWallet('0xbob');
-      expect(bobTrades).toHaveLength(1);
+      const bobBoth = db.getFillsForWallet('0xbob', { role: 'both' });
+      expect(bobBoth).toHaveLength(2);
+
+      const bobTaker = db.getFillsForWallet('0xbob', { role: 'taker' });
+      expect(bobTaker).toHaveLength(1);
     });
   });
 
@@ -309,7 +234,7 @@ describe('DB Integration', () => {
     });
   });
 
-  describe('point-in-time queries with saved trades', () => {
+  describe('point-in-time queries with saved fills', () => {
     beforeEach(() => {
       // Set up account with sync info
       db.saveAccount({
@@ -324,69 +249,69 @@ describe('DB Integration', () => {
         hasFullHistory: true,
       });
 
-      // Save trades at different timestamps
-      db.saveTrades([
+      // Save fills at different timestamps
+      // Note: In the new model, each fill is stored once (not per-perspective)
+      // The wallet participates as either maker or taker
+      db.saveFills([
         {
-          id: 'fill-1-taker',
-          txHash: '0xa',
-          wallet: '0xtrader',
-          marketId: 'token-1',
+          id: 'fill-1',
+          transactionHash: '0xa',
           timestamp: 1000,
+          orderHash: '0xo1',
           side: 'Buy',
-          action: 'BUY',
-          role: 'taker',
           size: 100000000,
           price: 500000,
-          valueUsd: 50000000,
+          maker: '0xmarket-maker',
+          taker: '0xtrader',
+          market: 'token-1',
         },
         {
-          id: 'fill-2-taker',
-          txHash: '0xb',
-          wallet: '0xtrader',
-          marketId: 'token-1',
+          id: 'fill-2',
+          transactionHash: '0xb',
           timestamp: 2000,
+          orderHash: '0xo2',
           side: 'Sell',
-          action: 'SELL',
-          role: 'taker',
           size: 100000000,
           price: 600000,
-          valueUsd: 60000000,
+          maker: '0xmarket-maker',
+          taker: '0xtrader',
+          market: 'token-1',
         },
         {
-          id: 'fill-3-taker',
-          txHash: '0xc',
-          wallet: '0xtrader',
-          marketId: 'token-2',
+          id: 'fill-3',
+          transactionHash: '0xc',
           timestamp: 3000,
+          orderHash: '0xo3',
           side: 'Buy',
-          action: 'BUY',
-          role: 'taker',
           size: 200000000,
           price: 400000,
-          valueUsd: 80000000,
+          maker: '0xmarket-maker',
+          taker: '0xtrader',
+          market: 'token-2',
         },
       ]);
     });
 
     it('calculates trade count at point in time', () => {
+      // getAccountStateAt counts fills where wallet is maker OR taker
       expect(db.getAccountStateAt('0xtrader', 1500).tradeCount).toBe(1);
       expect(db.getAccountStateAt('0xtrader', 2500).tradeCount).toBe(2);
       expect(db.getAccountStateAt('0xtrader', 5000).tradeCount).toBe(3);
     });
 
     it('calculates volume at point in time', () => {
-      expect(db.getAccountStateAt('0xtrader', 1500).volume).toBe(50000000);
-      expect(db.getAccountStateAt('0xtrader', 2500).volume).toBe(110000000);
-      expect(db.getAccountStateAt('0xtrader', 5000).volume).toBe(190000000);
+      // Volume is sum of fill sizes
+      expect(db.getAccountStateAt('0xtrader', 1500).volume).toBe(100000000);
+      expect(db.getAccountStateAt('0xtrader', 2500).volume).toBe(200000000);
+      expect(db.getAccountStateAt('0xtrader', 5000).volume).toBe(400000000);
     });
 
-    it('calculates P&L at point in time', () => {
-      // At 1500: only BUY, pnl = -50000000
-      expect(db.getAccountStateAt('0xtrader', 1500).pnl).toBe(-50000000);
-      // At 2500: BUY + SELL, pnl = 60000000 - 50000000 = 10000000
-      expect(db.getAccountStateAt('0xtrader', 2500).pnl).toBe(10000000);
-      // At 5000: BUY + SELL + BUY, pnl = 60000000 - 50000000 - 80000000 = -70000000
-      expect(db.getAccountStateAt('0xtrader', 5000).pnl).toBe(-70000000);
+    it('returns pnl as 0 (requires market resolution data)', () => {
+      // P&L calculation now requires market resolution data
+      // which is computed in the application layer
+      expect(db.getAccountStateAt('0xtrader', 1500).pnl).toBe(0);
+      expect(db.getAccountStateAt('0xtrader', 2500).pnl).toBe(0);
+      expect(db.getAccountStateAt('0xtrader', 5000).pnl).toBe(0);
     });
 
     it('marks as not approximate when full history available', () => {

@@ -5,25 +5,24 @@ import { initializeSchema } from './schema.js';
 
 export interface DBStatus {
   path: string;
-  trades: number;
+  fills: number;      // renamed from 'trades'
   accounts: number;
   redemptions: number;
   markets: number;
   backfillQueue: number;
 }
 
-export interface DBTrade {
+export interface DBEnrichedOrderFill {
   id: string;
-  txHash: string;
-  wallet: string;
-  marketId: string;
+  transactionHash: string;
   timestamp: number;
-  side: string;
-  action: string;
-  role: string;
-  size: number;
-  price: number;
-  valueUsd: number;
+  orderHash: string;
+  side: 'Buy' | 'Sell';
+  size: number;      // 6 decimals
+  price: number;     // 6 decimals
+  maker: string;
+  taker: string;
+  market: string;
 }
 
 export interface DBAccount {
@@ -70,7 +69,7 @@ export interface DBMarketSync {
   hasCompleteHistory: boolean;
 }
 
-export interface GetTradesForMarketOptions {
+export interface GetFillsOptions {
   after?: number;
   before?: number;
   role?: 'maker' | 'taker' | 'both';
@@ -113,7 +112,7 @@ export class TradeDB {
 
     return {
       path: this.dbPath,
-      trades: count('trades'),
+      fills: count('enriched_order_fills'),
       accounts: count('accounts'),
       redemptions: count('redemptions'),
       markets: count('markets'),
@@ -121,53 +120,58 @@ export class TradeDB {
     };
   }
 
-  saveTrades(trades: DBTrade[]): number {
+  saveFills(fills: DBEnrichedOrderFill[]): number {
     const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO trades
-      (id, tx_hash, wallet, market_id, timestamp, side, action, role, size, price, value_usd)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR IGNORE INTO enriched_order_fills
+      (id, transaction_hash, timestamp, order_hash, side, size, price, maker, taker, market)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let inserted = 0;
 
-    const insertMany = this.db.transaction((trades: DBTrade[]) => {
-      for (const t of trades) {
+    const insertMany = this.db.transaction((fills: DBEnrichedOrderFill[]) => {
+      for (const f of fills) {
         const result = stmt.run(
-          t.id, t.txHash, t.wallet.toLowerCase(), t.marketId,
-          t.timestamp, t.side, t.action, t.role, t.size, t.price, t.valueUsd
+          f.id,
+          f.transactionHash,
+          f.timestamp,
+          f.orderHash,
+          f.side,
+          f.size,
+          f.price,
+          f.maker.toLowerCase(),
+          f.taker.toLowerCase(),
+          f.market
         );
         inserted += result.changes;
       }
     });
 
-    insertMany(trades);
+    insertMany(fills);
     return inserted;
   }
 
-  getTradesForWallet(wallet: string, options: { before?: number } = {}): DBTrade[] {
-    let sql = `
-      SELECT id, tx_hash as txHash, wallet, market_id as marketId,
-             timestamp, side, action, role, size, price, value_usd as valueUsd
-      FROM trades WHERE wallet = ?
-    `;
-    const params: (string | number)[] = [wallet.toLowerCase()];
+  getFillsForWallet(
+    wallet: string,
+    options: GetFillsOptions = {}
+  ): DBEnrichedOrderFill[] {
+    const walletLower = wallet.toLowerCase();
+    const role = options.role ?? 'both';
 
-    if (options.before) {
-      sql += ' AND timestamp < ?';
-      params.push(options.before);
+    let sql: string;
+    let params: (string | number)[] = [];
+
+    if (role === 'maker') {
+      sql = `SELECT * FROM enriched_order_fills WHERE maker = ?`;
+      params = [walletLower];
+    } else if (role === 'taker') {
+      sql = `SELECT * FROM enriched_order_fills WHERE taker = ?`;
+      params = [walletLower];
+    } else {
+      // 'both' - wallet is either maker or taker
+      sql = `SELECT * FROM enriched_order_fills WHERE maker = ? OR taker = ?`;
+      params = [walletLower, walletLower];
     }
-    sql += ' ORDER BY timestamp DESC';
-
-    return this.db.prepare(sql).all(...params) as DBTrade[];
-  }
-
-  getTradesForMarket(marketId: string, options: GetTradesForMarketOptions = {}): DBTrade[] {
-    let sql = `
-      SELECT id, tx_hash as txHash, wallet, market_id as marketId,
-             timestamp, side, action, role, size, price, value_usd as valueUsd
-      FROM trades WHERE market_id = ?
-    `;
-    const params: (string | number)[] = [marketId];
 
     if (options.after !== undefined) {
       sql += ' AND timestamp >= ?';
@@ -177,9 +181,55 @@ export class TradeDB {
       sql += ' AND timestamp <= ?';
       params.push(options.before);
     }
-    if (options.role && options.role !== 'both') {
-      sql += ' AND role = ?';
-      params.push(options.role);
+
+    sql += ' ORDER BY timestamp DESC';
+
+    if (options.limit !== undefined) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const rows = this.db.prepare(sql).all(...params) as {
+      id: string;
+      transaction_hash: string;
+      timestamp: number;
+      order_hash: string;
+      side: string;
+      size: number;
+      price: number;
+      maker: string;
+      taker: string;
+      market: string;
+    }[];
+
+    return rows.map(r => ({
+      id: r.id,
+      transactionHash: r.transaction_hash,
+      timestamp: r.timestamp,
+      orderHash: r.order_hash,
+      side: r.side as 'Buy' | 'Sell',
+      size: r.size,
+      price: r.price,
+      maker: r.maker,
+      taker: r.taker,
+      market: r.market,
+    }));
+  }
+
+  getFillsForMarket(
+    market: string,
+    options: GetFillsOptions = {}
+  ): DBEnrichedOrderFill[] {
+    let sql = `SELECT * FROM enriched_order_fills WHERE market = ?`;
+    const params: (string | number)[] = [market];
+
+    if (options.after !== undefined) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.after);
+    }
+    if (options.before !== undefined) {
+      sql += ' AND timestamp <= ?';
+      params.push(options.before);
     }
 
     sql += ' ORDER BY timestamp DESC';
@@ -189,7 +239,31 @@ export class TradeDB {
       params.push(options.limit);
     }
 
-    return this.db.prepare(sql).all(...params) as DBTrade[];
+    const rows = this.db.prepare(sql).all(...params) as {
+      id: string;
+      transaction_hash: string;
+      timestamp: number;
+      order_hash: string;
+      side: string;
+      size: number;
+      price: number;
+      maker: string;
+      taker: string;
+      market: string;
+    }[];
+
+    return rows.map(r => ({
+      id: r.id,
+      transactionHash: r.transaction_hash,
+      timestamp: r.timestamp,
+      orderHash: r.order_hash,
+      side: r.side as 'Buy' | 'Sell',
+      size: r.size,
+      price: r.price,
+      maker: r.maker,
+      taker: r.taker,
+      market: r.market,
+    }));
   }
 
   saveAccount(account: DBAccount): void {
@@ -246,14 +320,24 @@ export class TradeDB {
     const approximate = !account || !account.hasFullHistory ||
       (account.syncedFrom !== null && account.syncedFrom > atTimestamp);
 
-    const result = this.db.prepare(`
-      SELECT COUNT(*) as tradeCount, COALESCE(SUM(value_usd), 0) as volume,
-        COALESCE(SUM(CASE WHEN action = 'SELL' THEN value_usd ELSE 0 END) -
-                 SUM(CASE WHEN action = 'BUY' THEN value_usd ELSE 0 END), 0) as pnl
-      FROM trades WHERE wallet = ? AND timestamp < ?
-    `).get(wallet.toLowerCase(), atTimestamp) as { tradeCount: number; volume: number; pnl: number };
+    const walletLower = wallet.toLowerCase();
 
-    return { ...result, approximate };
+    // Count fills where wallet participated (as maker or taker)
+    const result = this.db.prepare(`
+      SELECT COUNT(*) as tradeCount,
+             COALESCE(SUM(size), 0) as volume
+      FROM enriched_order_fills
+      WHERE (maker = ? OR taker = ?) AND timestamp < ?
+    `).get(walletLower, walletLower, atTimestamp) as { tradeCount: number; volume: number };
+
+    // P&L calculation needs to be done in application layer now
+    // since we need to know token outcome (YES/NO) to determine profit
+    return {
+      tradeCount: result.tradeCount,
+      volume: result.volume,
+      pnl: 0, // TODO: Requires market resolution data to compute
+      approximate,
+    };
   }
 
   saveRedemptions(redemptions: DBRedemption[]): number {

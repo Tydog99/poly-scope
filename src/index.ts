@@ -178,7 +178,7 @@ dbCommand
     const sizeMB = (statSync(status.path).size / 1024 / 1024).toFixed(2);
 
     console.log(`Database: ${status.path} (${sizeMB} MB)`);
-    console.log(`Trades: ${status.trades.toLocaleString()}`);
+    console.log(`Fills: ${status.fills.toLocaleString()}`);
     console.log(`Accounts: ${status.accounts.toLocaleString()}`);
     console.log(`Redemptions: ${status.redemptions.toLocaleString()}`);
     console.log(`Markets: ${status.markets.toLocaleString()}`);
@@ -203,7 +203,7 @@ dbCommand
     console.log(`Wallet: ${account.wallet}`);
     console.log(`Created: ${account.creationTimestamp ? new Date(account.creationTimestamp * 1000).toISOString() : 'unknown'}`);
     console.log(`Synced: ${account.syncedFrom ? new Date(account.syncedFrom * 1000).toISOString() : 'never'} to ${account.syncedTo ? new Date(account.syncedTo * 1000).toISOString() : 'never'}`);
-    console.log(`Trades in DB: ${db.getTradesForWallet(address).length}`);
+    console.log(`Fills in DB: ${db.getFillsForWallet(address).length}`);
     console.log(`Complete: ${account.hasFullHistory ? 'Yes' : 'No'}`);
     if (db.hasQueuedBackfill(address)) console.log(`Backfill: Queued`);
     db.close();
