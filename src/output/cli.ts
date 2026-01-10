@@ -487,7 +487,14 @@ export class CLIReporter {
         : h.firstTradeDate
           ? Math.floor((Date.now() - h.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24))
           : '?';
-      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(h.totalVolumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
+
+      // Use aggregated volume from conviction signal if available (more accurate than subgraph's collateralVolume)
+      const convictionSignal = st.score.signals.find(s => s.name === 'conviction');
+      const convictionDetails = convictionSignal?.details as Record<string, unknown> | undefined;
+      const aggregatedVolume = convictionDetails?.totalVolumeUsd as number | undefined;
+      const volumeUsd = aggregatedVolume ?? h.totalVolumeUsd;
+
+      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(volumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
     }
 
     return lines.join('\n');
