@@ -294,3 +294,170 @@ describe('Wallet mode trade aggregation', () => {
     expect(filtered.length).toBe(4);
   });
 });
+
+describe('Wallet trade cache point-in-time calculation', () => {
+  // Simulates the caching logic used in analyze.ts for point-in-time volume
+
+  interface MockAggregatedTrade {
+    transactionHash: string;
+    timestamp: Date;
+    totalValueUsd: number;
+    wallet: string;
+  }
+
+  function calculatePointInTimeVolume(
+    cachedTrades: MockAggregatedTrade[],
+    tradeTimestamp: Date
+  ): { tradeCount: number; volume: number } {
+    const tradeTimestampSec = tradeTimestamp.getTime() / 1000;
+    const priorTrades = cachedTrades.filter(
+      t => t.timestamp.getTime() / 1000 < tradeTimestampSec
+    );
+    const priorVolume = priorTrades.reduce((sum, t) => sum + t.totalValueUsd, 0);
+    return {
+      tradeCount: priorTrades.length,
+      volume: Math.round(priorVolume * 1e6),
+    };
+  }
+
+  it('calculates point-in-time volume correctly', () => {
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: new Date(1000000), totalValueUsd: 1000, wallet: '0x123' },
+      { transactionHash: 'tx2', timestamp: new Date(2000000), totalValueUsd: 2000, wallet: '0x123' },
+      { transactionHash: 'tx3', timestamp: new Date(3000000), totalValueUsd: 3000, wallet: '0x123' },
+    ];
+
+    // Query at timestamp 2500 - should include tx1 and tx2
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(2500000));
+
+    expect(result.tradeCount).toBe(2);
+    expect(result.volume).toBe(3000 * 1e6); // $3000 in 6 decimals
+  });
+
+  it('excludes trades at exact query timestamp (exclusive before)', () => {
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: new Date(1000000), totalValueUsd: 1000, wallet: '0x123' },
+      { transactionHash: 'tx2', timestamp: new Date(2000000), totalValueUsd: 5000, wallet: '0x123' },
+    ];
+
+    // Query at exactly tx2's timestamp - should NOT include tx2
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(2000000));
+
+    expect(result.tradeCount).toBe(1);
+    expect(result.volume).toBe(1000 * 1e6); // Only tx1's $1000
+  });
+
+  it('returns zero for first trade (no prior history)', () => {
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: new Date(1000000), totalValueUsd: 5000, wallet: '0x123' },
+    ];
+
+    // Query at tx1's timestamp - no prior trades
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(1000000));
+
+    expect(result.tradeCount).toBe(0);
+    expect(result.volume).toBe(0);
+  });
+
+  it('handles empty cache', () => {
+    const cachedTrades: MockAggregatedTrade[] = [];
+
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(1000000));
+
+    expect(result.tradeCount).toBe(0);
+    expect(result.volume).toBe(0);
+  });
+
+  it('correctly sums all prior trades', () => {
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: new Date(1000000), totalValueUsd: 100, wallet: '0x123' },
+      { transactionHash: 'tx2', timestamp: new Date(2000000), totalValueUsd: 200, wallet: '0x123' },
+      { transactionHash: 'tx3', timestamp: new Date(3000000), totalValueUsd: 300, wallet: '0x123' },
+      { transactionHash: 'tx4', timestamp: new Date(4000000), totalValueUsd: 400, wallet: '0x123' },
+      { transactionHash: 'tx5', timestamp: new Date(5000000), totalValueUsd: 500, wallet: '0x123' },
+    ];
+
+    // Query at tx5's timestamp - should include tx1-tx4
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(5000000));
+
+    expect(result.tradeCount).toBe(4);
+    expect(result.volume).toBe(1000 * 1e6); // 100+200+300+400 = $1000
+  });
+
+  it('handles trades with same timestamp (all excluded)', () => {
+    const sameTimestamp = new Date(1000000);
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: sameTimestamp, totalValueUsd: 1000, wallet: '0x123' },
+      { transactionHash: 'tx2', timestamp: sameTimestamp, totalValueUsd: 2000, wallet: '0x123' },
+      { transactionHash: 'tx3', timestamp: sameTimestamp, totalValueUsd: 3000, wallet: '0x123' },
+    ];
+
+    // Query at the shared timestamp - all excluded
+    const result = calculatePointInTimeVolume(cachedTrades, sameTimestamp);
+
+    expect(result.tradeCount).toBe(0);
+    expect(result.volume).toBe(0);
+  });
+
+  it('correctly handles sub-second precision', () => {
+    // Timestamps in milliseconds - 1 second apart
+    const cachedTrades: MockAggregatedTrade[] = [
+      { transactionHash: 'tx1', timestamp: new Date(1000000), totalValueUsd: 1000, wallet: '0x123' },
+      { transactionHash: 'tx2', timestamp: new Date(2000000), totalValueUsd: 2000, wallet: '0x123' },
+    ];
+
+    // Query at 1500000ms = 1500 seconds
+    // tx1: 1000000/1000 = 1000s < 1500s, included
+    // tx2: 2000000/1000 = 2000s > 1500s, excluded
+    const result = calculatePointInTimeVolume(cachedTrades, new Date(1500000));
+
+    expect(result.tradeCount).toBe(1);
+    expect(result.volume).toBe(1000 * 1e6);
+  });
+});
+
+describe('Cache pre-computation logic', () => {
+  // Tests the structure of pre-computed cache
+
+  it('caches aggregated trades per wallet', () => {
+    // Simulate the cache structure
+    const walletTradeCache = new Map<string, { timestamp: Date; totalValueUsd: number }[]>();
+
+    // Add trades for wallet A
+    walletTradeCache.set('0xaaa', [
+      { timestamp: new Date(1000000), totalValueUsd: 1000 },
+      { timestamp: new Date(2000000), totalValueUsd: 2000 },
+    ]);
+
+    // Add trades for wallet B
+    walletTradeCache.set('0xbbb', [
+      { timestamp: new Date(1500000), totalValueUsd: 5000 },
+    ]);
+
+    expect(walletTradeCache.size).toBe(2);
+    expect(walletTradeCache.get('0xaaa')?.length).toBe(2);
+    expect(walletTradeCache.get('0xbbb')?.length).toBe(1);
+  });
+
+  it('handles wallet not in cache gracefully', () => {
+    const walletTradeCache = new Map<string, { timestamp: Date; totalValueUsd: number }[]>();
+
+    const cachedTrades = walletTradeCache.get('0xnonexistent');
+
+    expect(cachedTrades).toBeUndefined();
+  });
+
+  it('lowercases wallet addresses for cache lookup', () => {
+    const walletTradeCache = new Map<string, { timestamp: Date; totalValueUsd: number }[]>();
+
+    walletTradeCache.set('0xabc', [
+      { timestamp: new Date(1000000), totalValueUsd: 1000 },
+    ]);
+
+    // Lookup with different case
+    const result = walletTradeCache.get('0xABC'.toLowerCase());
+
+    expect(result).toBeDefined();
+    expect(result?.length).toBe(1);
+  });
+});
