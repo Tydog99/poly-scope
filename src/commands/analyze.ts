@@ -160,7 +160,8 @@ export class AnalyzeCommand {
           // 2. Maker/taker double-counting -> pick higher value role
           // 3. Complementary trades (YES+NO in same tx) -> filter smaller side
           allTrades = aggregateFillsPerWallet(rawFills, tokenToOutcome);
-          console.log(`Aggregated ${rawFills.length} fills to ${allTrades.length} trades`);
+          const uniqueWallets = new Set(allTrades.map(t => t.wallet)).size;
+          console.log(`Processed ${rawFills.length} fills → ${allTrades.length} trades across ${uniqueWallets} wallets`);
         } else {
           allTrades = [];
         }
@@ -494,10 +495,13 @@ export class AnalyzeCommand {
       }
 
       // Read from DB (includes both cached and newly saved)
+      // Note: Don't limit per-token here - let the final sort+limit handle it
+      // This ensures we get all fills including older maker fills needed for
+      // proper complementary trade detection in cross-matched transactions
       const dbFills = this.tradeDb.getFillsForMarket(token.tokenId, {
         after: requestedRange.after,
         before: requestedRange.before,
-        limit: perTokenLimit,
+        // No per-token limit - apply total limit after combining both tokens
       });
 
       // Convert DBEnrichedOrderFill back to SubgraphTrade format for aggregation

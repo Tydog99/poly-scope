@@ -40,25 +40,45 @@ export function buildTokenToOutcomeFromResolved(
 
 /**
  * Aggregate fills per wallet for multi-wallet analysis.
- * Groups fills by taker wallet, then aggregates each wallet's fills.
+ * Groups fills by wallet (both maker and taker roles), then aggregates each wallet's fills.
+ *
+ * IMPORTANT: Each fill is added to BOTH the maker's and taker's groups because:
+ * 1. In CLOB cross-matching, a wallet's YES buy order can trigger NO fills for counterparties
+ * 2. The wallet appears as maker on YES (their order) and taker on NO (counterparty appearance)
+ * 3. aggregateFills() handles role-based complementary filtering to keep the correct side
  */
 export function aggregateFillsPerWallet(
   fills: SubgraphTrade[],
   tokenToOutcome: Map<string, 'YES' | 'NO'>
 ): Trade[] {
-  // Group fills by wallet (using taker as the wallet - taker analysis)
+  // Group fills by wallet (includes both maker and taker roles)
   const fillsByWallet = new Map<string, SubgraphTrade[]>();
-  for (const fill of fills) {
-    const wallet = fill.taker?.toLowerCase();
-    if (!wallet) continue;
 
-    if (!fillsByWallet.has(wallet)) {
-      fillsByWallet.set(wallet, []);
+  for (const fill of fills) {
+    // Add fill to maker's group
+    const maker = fill.maker?.toLowerCase();
+    if (maker) {
+      if (!fillsByWallet.has(maker)) {
+        fillsByWallet.set(maker, []);
+      }
+      fillsByWallet.get(maker)!.push(fill);
     }
-    fillsByWallet.get(wallet)!.push(fill);
+
+    // Add fill to taker's group
+    const taker = fill.taker?.toLowerCase();
+    if (taker) {
+      if (!fillsByWallet.has(taker)) {
+        fillsByWallet.set(taker, []);
+      }
+      fillsByWallet.get(taker)!.push(fill);
+    }
   }
 
   // Aggregate each wallet's fills
+  // aggregateFills() handles:
+  // - Role detection (maker vs taker per fill)
+  // - Side inversion for takers
+  // - Complementary trade filtering (prefers maker role when no position data)
   const allTrades: Trade[] = [];
   for (const [wallet, walletFills] of fillsByWallet) {
     const aggregated = aggregateFills(walletFills, {
