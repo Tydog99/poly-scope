@@ -629,11 +629,11 @@ export class CLIReporter {
       lines.push(chalk.bold(`Positions & Realized Gains (${posCount} positions, ${redemptionCount} redemptions):`));
       lines.push('');
 
-      // Table header - align with data columns (58 market + 12 cost + 12 pnl + 12 realized + 10 shares + 10 roi)
+      // Table header - align with data columns (58 market + 12 cost + 12 pnl + 12 realized + 14 shares + 10 roi)
       lines.push(
-        chalk.gray(`  ${'Market'.padEnd(58)} ${'Cost Basis'.padStart(12)}    ${'Trading P&L'.padStart(12)}    ${'Realized'.padStart(12)}    ${'Shares'.padStart(10)}  ${'ROI'.padStart(10)}`)
+        chalk.gray(`  ${'Market'.padEnd(58)} ${'Cost Basis'.padStart(12)}    ${'Trading P&L'.padStart(12)}    ${'Realized'.padStart(12)}    ${'Shares'.padStart(14)}  ${'ROI'.padStart(10)}`)
       );
-      lines.push(chalk.gray('  ' + '─'.repeat(126)));
+      lines.push(chalk.gray('  ' + '─'.repeat(130)));
 
       // Track totals
       let totalCostBasis = 0;
@@ -684,17 +684,17 @@ export class CLIReporter {
           : chalk.dim('—'.padStart(12));
 
         // Shares column - detect sync issue (redeemed but still has shares)
-        let sharesStr: string;
-        let sharesSuffix = '';
+        // Pad raw values BEFORE applying chalk (ANSI codes break padStart)
+        let sharesDisplay: string;
         if (redemption > 0 && netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString();
-          sharesSuffix = chalk.yellow('**');
+          const raw = Math.round(netQty).toLocaleString() + '**';
+          sharesDisplay = raw.padStart(14).replace('**', chalk.yellow('**'));
           hasUnsyncedPositions = true;
         } else if (netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString();
+          sharesDisplay = Math.round(netQty).toLocaleString().padStart(14);
         } else {
           // No shares remaining (sold or redeemed)
-          sharesStr = chalk.dim('0');
+          sharesDisplay = chalk.dim('0'.padStart(14));
         }
 
         // Format realized gains (redemption payout for this market)
@@ -722,7 +722,7 @@ export class CLIReporter {
         const marketDisplay = truncatedQuestion + chalk.gray(outcomeSuffix) + padding;
 
         lines.push(
-          `  ${marketDisplay} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
+          `  ${marketDisplay} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesDisplay}  ${roiStr}`
         );
       }
 
@@ -732,7 +732,7 @@ export class CLIReporter {
 
       // Summary totals
       lines.push('');
-      lines.push(chalk.gray('  ' + '─'.repeat(126)));
+      lines.push(chalk.gray('  ' + '─'.repeat(130)));
       const totalPnL = totalTradingPnL + totalRealized;
       const totalColor = totalPnL >= 0 ? chalk.green : chalk.red;
       const totalSign = totalPnL >= 0 ? '+' : '';
@@ -799,7 +799,9 @@ export class CLIReporter {
         const marketDisplay = this.truncateQuestion(question, 50) + chalk.gray(` (${outcomeDisplay})`);
 
         lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
-        lines.push(chalk.gray(`          ${firstTrade.marketId}`));
+        // Show condition ID (market slug ID) if available, otherwise token ID
+        const marketIdDisplay = resolved?.conditionId ?? firstTrade.marketId;
+        lines.push(chalk.gray(`          ${marketIdDisplay}`));
 
         // Track totals for this market
         let totalBuyValue = 0, totalSellValue = 0, totalFills = 0;
