@@ -94,12 +94,13 @@ describe('Backfill', () => {
           id: 'fill-1',
           transactionHash: '0xtx1',
           timestamp: 1700000000,
+          orderHash: '0xorder1',
           maker: '0xmaker',
           taker: '0xwallet',
           marketId: 'token123',
           side: 'Sell' as const,
           size: '100000000', // 100 USD (6 decimals)
-          price: '500000', // 0.5
+          price: '0.5',
         },
       ];
 
@@ -112,10 +113,10 @@ describe('Backfill', () => {
 
       await backfillWallet(db, mockSubgraph as any, '0xwallet');
 
-      const trades = db.getTradesForWallet('0xwallet');
-      expect(trades.length).toBe(1);
-      expect(trades[0].id).toBe('fill-1');
-      expect(trades[0].valueUsd).toBe(100000000); // Stored in 6 decimal format
+      const fills = db.getFillsForWallet('0xwallet');
+      expect(fills.length).toBe(1);
+      expect(fills[0].id).toBe('fill-1');
+      expect(fills[0].size).toBe(100000000); // Stored in 6 decimal format
     });
 
     it('paginates through all trades', async () => {
@@ -126,12 +127,13 @@ describe('Backfill', () => {
         id: `fill-${i}`,
         transactionHash: `0xtx${i}`,
         timestamp: 1700000000 - i * 1000, // Descending timestamps
+        orderHash: `0xorder${i}`,
         maker: '0xmaker',
         taker: '0xpaginate',
         marketId: 'token123',
         side: 'Sell' as const,
         size: '10000000',
-        price: '500000',
+        price: '0.5',
       }));
 
       // Second page
@@ -139,12 +141,13 @@ describe('Backfill', () => {
         id: `fill-${100 + i}`,
         transactionHash: `0xtx${100 + i}`,
         timestamp: 1699900000 - i * 1000,
+        orderHash: `0xorder${100 + i}`,
         maker: '0xmaker',
         taker: '0xpaginate',
         marketId: 'token123',
         side: 'Sell' as const,
         size: '10000000',
-        price: '500000',
+        price: '0.5',
       }));
 
       const mockSubgraph = {
@@ -157,8 +160,8 @@ describe('Backfill', () => {
 
       await backfillWallet(db, mockSubgraph as any, '0xpaginate');
 
-      const trades = db.getTradesForWallet('0xpaginate');
-      expect(trades.length).toBe(150);
+      const fills = db.getFillsForWallet('0xpaginate');
+      expect(fills.length).toBe(150);
     });
 
     it('marks wallet as complete after successful backfill', async () => {

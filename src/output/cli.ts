@@ -238,6 +238,8 @@ export class CLIReporter {
         const reason = details.reason as string | undefined;
         if (reason === 'no_history') {
           lines.push(chalk.red(`    - NEW ACCOUNT - no trading history found`));
+        } else if (reason === 'skipped_budget') {
+          lines.push(chalk.yellow(`    - Account history not fetched (budget limit)`));
         } else {
           const totalTrades = details.totalTrades as number | undefined;
           const ageDays = details.accountAgeDays as number | undefined;
@@ -248,9 +250,9 @@ export class CLIReporter {
           const dormancyScore = details.dormancyScore as number | undefined;
           const profitScore = details.profitScore as number | undefined;
 
-          lines.push(chalk.gray(`    - Trade count: ${totalTrades || '?'} -> ${tradeCountScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Account age: ${ageDays || '?'} days -> ${ageScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Dormancy: ${dormancy || 0} days idle -> ${dormancyScore ?? 0} pts`));
+          lines.push(chalk.gray(`    - Trade count: ${totalTrades ?? '?'} -> ${tradeCountScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Account age: ${ageDays ?? '?'} days -> ${ageScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Dormancy: ${dormancy ?? 0} days idle -> ${dormancyScore ?? 0} pts`));
           if (profitUsd !== undefined && profitScore !== undefined) {
             lines.push(chalk.gray(`    - Profit on new account: ${this.formatUsd(profitUsd)} -> ${profitScore} pts`));
           } else {
@@ -264,7 +266,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
 
           lines.push(chalk.gray(`    - Trade concentration: ${tradePct?.toFixed(1) || '?'}% of volume -> ${signal.score} pts`));
           lines.push(chalk.gray(`      (${this.formatUsd(tradeValue || 0)} trade / ${this.formatUsd(totalVolume || 0)} total)`));
@@ -442,8 +444,8 @@ export class CLIReporter {
         const sizeScore = details.sizeScore as number | undefined;
         const impactScore = details.impactScore as number | undefined;
         detailStr = `value=$${Math.round(valueUsd || 0).toLocaleString()}, ` +
-          `impact=${impactPct?.toFixed(1) || '?'}%, ` +
-          `sizeScore=${sizeScore || '?'}, impactScore=${impactScore || '?'}`;
+          `impact=${impactPct?.toFixed(1) ?? '?'}%, ` +
+          `sizeScore=${sizeScore ?? '?'}, impactScore=${impactScore ?? '?'}`;
       } else if (signal.name === 'accountHistory') {
         const reason = details.reason as string | undefined;
         if (reason === 'skipped_budget') {
@@ -456,8 +458,8 @@ export class CLIReporter {
           const dormancy = details.dormancyDays as number | undefined;
           const dataSource = details.dataSource as string | undefined;
           const profitUsd = details.profitUsd as number | undefined;
-          detailStr = `trades=${totalTrades || '?'}, age=${ageDays || '?'}d, ` +
-            `dormancy=${dormancy || 0}d` +
+          detailStr = `trades=${totalTrades ?? '?'}, age=${ageDays ?? '?'}d, ` +
+            `dormancy=${dormancy ?? 0}d` +
             (profitUsd !== undefined ? `, profit=$${Math.round(profitUsd).toLocaleString()}` : '') +
             ` [${dataSource || '?'}]`;
         }
@@ -468,7 +470,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
           detailStr = `trade=$${Math.round(tradeValue || 0).toLocaleString()} / ` +
             `total=$${Math.round(totalVolume || 0).toLocaleString()} = ${tradePct?.toFixed(1) || '?'}%`;
         }
@@ -485,7 +487,14 @@ export class CLIReporter {
         : h.firstTradeDate
           ? Math.floor((Date.now() - h.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24))
           : '?';
-      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(h.totalVolumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
+
+      // Use aggregated volume from conviction signal if available (more accurate than subgraph's collateralVolume)
+      const convictionSignal = st.score.signals.find(s => s.name === 'conviction');
+      const convictionDetails = convictionSignal?.details as Record<string, unknown> | undefined;
+      const aggregatedVolume = convictionDetails?.totalVolumeUsd as number | undefined;
+      const volumeUsd = aggregatedVolume ?? h.totalVolumeUsd;
+
+      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(volumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
     }
 
     return lines.join('\n');

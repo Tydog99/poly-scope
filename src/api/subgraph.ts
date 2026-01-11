@@ -553,7 +553,7 @@ export class SubgraphClient {
       query($user: String!) {
         redemptions(
           first: 100,
-          where: { redeemer_: { id: $user } }
+          where: { redeemer_: { id: $user }, condition_not: null }
           orderBy: timestamp
           orderDirection: desc
         ) {
@@ -608,7 +608,7 @@ export class SubgraphClient {
 
       // Build aliased query fragments
       const fragments = chunk.map((w, i) => `
-        r${i}: redemptions(first: 100, where: { redeemer_: { id: "${w}" } }) {
+        r${i}: redemptions(first: 100, where: { redeemer_: { id: "${w}" }, condition_not: null }) {
           id
           timestamp
           payout

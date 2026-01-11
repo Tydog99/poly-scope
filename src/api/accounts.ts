@@ -108,10 +108,43 @@ export class AccountFetcher {
    */
   async getAccountHistoryBatch(wallets: string[]): Promise<Map<string, AccountHistory>> {
     const results = new Map<string, AccountHistory>();
-    const walletsToFetch = [...wallets];
+    const walletsToFetch: string[] = [];
+    const staleMs = 60 * 60 * 1000; // 1 hour
+
+    // Check DB cache first for all wallets
+    for (const wallet of wallets) {
+      const normalizedWallet = wallet.toLowerCase();
+
+      if (this.tradeDb) {
+        const account = this.tradeDb.getAccount(normalizedWallet);
+        if (account && account.syncedAt) {
+          const isFresh = Date.now() - account.syncedAt * 1000 < staleMs;
+          if (isFresh) {
+            // Return cached data
+            results.set(normalizedWallet, {
+              wallet: account.wallet,
+              totalTrades: account.tradeCountTotal ?? 0,
+              firstTradeDate: account.syncedFrom ? new Date(account.syncedFrom * 1000) : null,
+              lastTradeDate: account.syncedTo ? new Date(account.syncedTo * 1000) : null,
+              totalVolumeUsd: account.collateralVolume ? account.collateralVolume / 1e6 : 0,
+              creationDate: account.creationTimestamp ? new Date(account.creationTimestamp * 1000) : undefined,
+              profitUsd: account.profit ? account.profit / 1e6 : undefined,
+              dataSource: 'cache',
+            });
+            continue;
+          }
+        }
+      }
+      walletsToFetch.push(wallet);
+    }
 
     if (walletsToFetch.length === 0) {
       return results;
+    }
+
+    const cacheHits = wallets.length - walletsToFetch.length;
+    if (cacheHits > 0) {
+      console.log(`    ${cacheHits} accounts from cache, ${walletsToFetch.length} to fetch`);
     }
 
     // Fetch wallets
@@ -136,6 +169,26 @@ export class AccountFetcher {
       // Fetch redemptions for all wallets in batch
       console.log(`    Fetching redemptions for ${walletsToFetch.length} wallets...`);
       const allRedemptions = await this.subgraphClient.getRedemptionsBatch(walletsToFetch);
+
+      // Save redemptions to DB
+      if (this.tradeDb) {
+        const dbRedemptions: import('../db/index.js').DBRedemption[] = [];
+        for (const [wallet, redemptions] of allRedemptions) {
+          for (const r of redemptions) {
+            dbRedemptions.push({
+              id: r.id,
+              wallet: wallet.toLowerCase(),
+              conditionId: r.conditionId,
+              timestamp: r.timestamp,
+              payout: parseInt(r.payout), // Already 6 decimals from subgraph
+            });
+          }
+        }
+        if (dbRedemptions.length > 0) {
+          this.tradeDb.saveRedemptions(dbRedemptions);
+        }
+      }
+
       console.log(`    Fetching account data...`);
 
       // Process chunks sequentially to avoid rate limiting
@@ -288,6 +341,27 @@ export class AccountFetcher {
       for (const wallet of walletsToFetch) {
         const history = await this.getFromDataApi(wallet);
         results.set(wallet.toLowerCase(), history);
+      }
+    }
+
+    // Save all freshly-fetched accounts to DB for future cache hits
+    if (this.tradeDb) {
+      const now = Math.floor(Date.now() / 1000);
+      for (const [wallet, history] of results) {
+        // Skip accounts that were from cache (already in DB)
+        if (history.dataSource === 'cache') continue;
+
+        this.tradeDb.saveAccount({
+          wallet: history.wallet,
+          creationTimestamp: history.creationDate ? Math.floor(history.creationDate.getTime() / 1000) : null,
+          syncedFrom: history.firstTradeDate ? Math.floor(history.firstTradeDate.getTime() / 1000) : null,
+          syncedTo: history.lastTradeDate ? Math.floor(history.lastTradeDate.getTime() / 1000) : now,
+          syncedAt: now,
+          tradeCountTotal: history.totalTrades,
+          collateralVolume: Math.round(history.totalVolumeUsd * 1e6),
+          profit: history.profitUsd ? Math.round(history.profitUsd * 1e6) : null,
+          hasFullHistory: false,
+        });
       }
     }
 

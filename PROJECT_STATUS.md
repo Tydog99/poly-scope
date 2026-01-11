@@ -1,13 +1,13 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-08
+Last updated: 2026-01-09
 
 ## 1. Current Implementation - Fully Functional
 
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 257 tests passing across 23 test files
+- **Test Status**: All 353 tests passing across 27 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -111,13 +111,14 @@ Last updated: 2026-01-08
 - `trades` - All trade fills with wallet, market, timestamp, size, price, side, role
 - `accounts` - Wallet metadata: creation timestamp, synced_from/to watermarks, complete flag
 - `redemptions` - Winning token redemptions with payout amounts
-- `markets` - Token ID to condition ID mapping
+- `markets` - Token ID to condition ID mapping with sync watermarks (synced_from/to/at, has_complete_history)
 - `backfill_queue` - Pending wallet backfill requests with priority
-- `schema_version` - Database migration tracking
+- `schema_version` - Database migration tracking (current version: 2)
 
 **Key Features**:
 - **Point-in-Time Queries**: `getAccountStateAt(wallet, timestamp)` computes trade count, volume, and P&L at any historical moment
-- **Sync Watermarks**: Tracks earliest/latest synced timestamp per wallet for incremental backfill
+- **Sync Watermarks**: Tracks earliest/latest synced timestamp per wallet AND per market for incremental fetching
+- **Market Trade Caching**: `analyze` command checks DB first, only fetches missing/stale ranges from subgraph (1-hour freshness TTL)
 - **Background Backfill**: Priority queue system for opportunistic history fetching
 - **Automatic Caching**: AccountFetcher saves fetched data to DB with 1-hour freshness window
 - **WAL Mode**: Concurrent reads during writes for better performance
@@ -140,7 +141,7 @@ Last updated: 2026-01-08
 
 ## 2. Test Coverage Analysis
 
-### Test Suite (257 tests across 23 files)
+### Test Suite (353 tests across 27 files)
 
 | Module | Tests | Status | Notes |
 |--------|-------|--------|-------|
@@ -259,7 +260,7 @@ Historical analysis now uses **point-in-time account state** from the database i
 
 ### Strengths
 - Clean architecture - Separation of concerns (api, signals, commands, output)
-- Comprehensive test suite - 77 tests with integration tests
+- Comprehensive test suite - 353 tests with integration tests
 - Error handling - Graceful fallbacks between data sources
 - Configuration - Flexible config system with CLI overrides
 - Documentation - Extensive README with limitations documented
@@ -307,7 +308,7 @@ Historical analysis now uses **point-in-time account state** from the database i
 | Point-in-time analysis | Working | Via `getAccountStateAt()` queries |
 | Background backfill | Working | Priority queue with opportunistic fetching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 257/257 passing |
+| Test suite | Working | 353/353 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
@@ -360,7 +361,7 @@ src/
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (23 test files, 257 tests)
+tests/ (27 test files, 353 tests)
 scripts/ (2 utilities)
 docs/ (Planning documents)
 .data/ (SQLite database - gitignored)
@@ -495,3 +496,9 @@ docs/ (Planning documents)
 | 2026-01-08 | Removed old JSON cache classes (Phase 6 cleanup): deleted `AccountCache`, `TradeCache`, `RedemptionCache`, `TradeCountCache` from `src/api/`; removed cache imports from `accounts.ts` and `trades.ts`; simplified TradeFetcher to fetch directly without caching; AccountFetcher now uses TradeDB exclusively for caching; deleted 4 cache files and 3 test files; moved `TradeCountData` type to `types.ts`; 257 tests pass |
 | 2026-01-08 | Added `.data/` to `.gitignore` for SQLite database directory (`.data/trades.db` and WAL files) |
 | 2026-01-08 | **Trade Database Implementation Complete**: SQLite replaces JSON caching; point-in-time analysis via `getAccountStateAt()`; background backfill system; 6 new `db` CLI commands; all signals use historicalState; 257 tests pass |
+| 2026-01-08 | **Fixed DB integration wiring**: Commands now pass `tradeDb` to AccountFetcher (was missing connection); added batch caching to `getAccountHistoryBatch()` - checks DB first, saves fetched accounts; verified with real market analysis showing cache hits on second run; 281 tests pass |
+| 2026-01-08 | Updated `migrate.ts` to handle both old flat format and new aggregated format for JSON trade files; validation now uses unique trade IDs to avoid double-counting across market files |
+| 2026-01-09 | **Added market-level sync watermarks**: Schema version bumped to 2; markets table now has `synced_from`, `synced_to`, `synced_at`, `has_complete_history` columns; automatic migration for existing DBs |
+| 2026-01-09 | **Added market sync methods to TradeDB**: `getMarketSync(tokenId)` retrieves sync status, `updateMarketSync(tokenId, {...})` updates watermarks; enhanced `getTradesForMarket()` with after/before/role/limit filtering |
+| 2026-01-09 | **Added TradeCacheChecker class** (`src/api/trade-cache.ts`): Determines cache coverage for market trades - returns `missing`, `stale`, `partial-older`, `partial-newer`, or `none` with recommended fetch ranges |
+| 2026-01-09 | **Implemented DB-first trade fetching in analyze command**: Now checks DB cache first before subgraph; only fetches missing/stale data; updates sync watermarks after each fetch; 1-hour freshness TTL; 43 new tests added (324 total) |

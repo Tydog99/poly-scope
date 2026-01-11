@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import type { TradeDB, DBTrade, DBRedemption } from './index.js';
+import type { TradeDB, DBEnrichedOrderFill, DBRedemption } from './index.js';
 
 export interface MigrationResult {
   trades: number;
@@ -16,7 +16,8 @@ export interface ValidationResult {
   warnings: string[];
 }
 
-interface JsonTrade {
+// New aggregated format (with fills array)
+interface JsonTradeAggregated {
   transactionHash: string;
   wallet: string;
   marketId: string;
@@ -28,6 +29,19 @@ interface JsonTrade {
   avgPrice: number;
   totalValueUsd: number;
   fills: Array<{ id: string; size: number; price: number; valueUsd: number; timestamp: string }>;
+}
+
+// Old flat format (each trade is a single fill)
+interface JsonTradeFlat {
+  id: string;
+  wallet: string;
+  marketId: string;
+  timestamp: string;
+  side: string;
+  role: string;
+  size: number;
+  price: number;
+  valueUsd: number;
 }
 
 interface JsonAccount {
@@ -57,22 +71,47 @@ export function importJsonCaches(db: TradeDB, cacheDir: string = '.cache'): Migr
     for (const file of readdirSync(tradesDir).filter(f => f.endsWith('.json'))) {
       try {
         const data = JSON.parse(readFileSync(join(tradesDir, file), 'utf-8'));
-        const trades: DBTrade[] = (data.trades || []).flatMap((t: JsonTrade) =>
-          t.fills.map(f => ({
-            id: f.id,
-            txHash: t.transactionHash,
-            wallet: t.wallet,
-            marketId: t.marketId,
-            timestamp: Math.floor(new Date(f.timestamp).getTime() / 1000),
-            side: t.side,
-            action: t.action,
-            role: t.role,
-            size: Math.round(f.size * 1e6),
-            price: Math.round(f.price * 1e6),
-            valueUsd: Math.round(f.valueUsd * 1e6),
-          }))
-        );
-        result.trades += db.saveTrades(trades);
+        const rawTrades = data.trades || [];
+
+        // Detect format: new aggregated (has fills array) vs old flat (no fills)
+        const isAggregatedFormat = rawTrades.length > 0 && Array.isArray(rawTrades[0].fills);
+
+        let fills: DBEnrichedOrderFill[];
+        if (isAggregatedFormat) {
+          // New format: flatten fills from aggregated trades
+          fills = rawTrades.flatMap((t: JsonTradeAggregated) =>
+            t.fills.map(f => ({
+              id: f.id,
+              transactionHash: t.transactionHash,
+              timestamp: Math.floor(new Date(f.timestamp).getTime() / 1000),
+              orderHash: '', // Not available in JSON cache
+              side: t.side === 'BUY' ? 'Buy' as const : 'Sell' as const,
+              size: Math.round(f.size * 1e6),
+              price: Math.round(f.price * 1e6),
+              // Map wallet to maker/taker based on role
+              maker: t.role === 'maker' ? t.wallet : '',
+              taker: t.role === 'taker' ? t.wallet : '',
+              market: t.marketId,
+            }))
+          );
+        } else {
+          // Old flat format: each trade is already a fill
+          fills = rawTrades.map((t: JsonTradeFlat) => ({
+            id: t.id,
+            transactionHash: t.id.split('-')[0] || t.id, // Extract txHash from id if available
+            timestamp: Math.floor(new Date(t.timestamp).getTime() / 1000),
+            orderHash: '', // Not available in JSON cache
+            side: t.side === 'BUY' ? 'Buy' as const : 'Sell' as const,
+            size: Math.round(t.size * 1e6),
+            price: Math.round(t.price * 1e6),
+            // Map wallet to maker/taker based on role
+            maker: t.role === 'maker' ? t.wallet : '',
+            taker: t.role === 'taker' ? t.wallet : '',
+            market: t.marketId,
+          }));
+        }
+
+        result.trades += db.saveFills(fills);
       } catch (e) {
         result.errors.push(`Failed to import ${file}: ${(e as Error).message}`);
       }
@@ -146,28 +185,42 @@ function countJsonRecords(dir: string, arrayKey?: string): number {
 }
 
 export function validateMigration(db: TradeDB, cacheDir: string = '.cache'): ValidationResult {
+  const status = db.getStatus();
   const dbCounts = {
-    trades: db.getStatus().trades,
-    accounts: db.getStatus().accounts,
-    redemptions: db.getStatus().redemptions,
+    trades: status.fills,  // Use fills count (trades renamed to fills)
+    accounts: status.accounts,
+    redemptions: status.redemptions,
   };
 
-  // Count trades by fills, not by file
-  let jsonTradeCount = 0;
+  // Count unique trade IDs across all files (trades can appear in multiple market files)
+  const uniqueTradeIds = new Set<string>();
   const tradesDir = join(cacheDir, 'trades');
   if (existsSync(tradesDir)) {
     for (const file of readdirSync(tradesDir).filter(f => f.endsWith('.json'))) {
       try {
         const data = JSON.parse(readFileSync(join(tradesDir, file), 'utf-8'));
-        for (const trade of data.trades || []) {
-          jsonTradeCount += (trade.fills || []).length;
+        const rawTrades = data.trades || [];
+        const isAggregatedFormat = rawTrades.length > 0 && Array.isArray(rawTrades[0].fills);
+
+        if (isAggregatedFormat) {
+          // New format: collect fill IDs
+          for (const trade of rawTrades) {
+            for (const fill of trade.fills || []) {
+              uniqueTradeIds.add(fill.id);
+            }
+          }
+        } else {
+          // Old flat format: each trade has its own ID
+          for (const trade of rawTrades) {
+            uniqueTradeIds.add(trade.id);
+          }
         }
       } catch { /* ignore */ }
     }
   }
 
   const jsonCounts = {
-    trades: jsonTradeCount,
+    trades: uniqueTradeIds.size,
     accounts: countJsonRecords(join(cacheDir, 'accounts')),
     redemptions: countJsonRecords(join(cacheDir, 'redemptions'), 'redemptions'),
   };

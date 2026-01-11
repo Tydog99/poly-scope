@@ -203,18 +203,19 @@ function getWalletAction(trade: SubgraphTrade, walletAddress: string): 'BUY' | '
 }
 ```
 
-### Avoiding Double-Counting: Role Filtering
+### Avoiding Double-Counting: Role-Based Deduplication
 
 **IMPORTANT**: Each trade generates fills for both maker and taker. Naively summing all OrderFilled events inflates volume by ~2x.
 
-**Solution**: Use one-sided analysis:
-- `--role taker` (default for `analyze` command) - Takers hit the orderbook with urgency
-- `--role maker` - Alternative perspective for passive order analysis
-- `--role both` - Includes both (may double-count, use for wallet investigation)
+**Solution**: The `analyze` command includes both maker and taker fills but deduplicates via:
+1. Grouping fills by wallet (both roles)
+2. Aggregating by transaction hash
+3. Filtering complementary trades (when a tx has both YES and NO, keeps the primary based on maker role or larger value)
 
-The `analyze` command defaults to **taker-only** to avoid double-counting and because takers are more likely to show insider behavior (urgent market orders vs passive limit orders).
-
-The `investigate` command uses **both** roles since we want to see all activity for a specific wallet.
+For wallet-specific analysis (`-w` flag), the `--role` option filters by role before aggregation:
+- `--role maker` (default for wallet mode) - Shows fills where wallet placed the order
+- `--role taker` - Shows fills where wallet hit existing orders
+- `--role both` - Shows all fills
 
 **Key Resources**:
 - [Paradigm: Polymarket Volume Double-Counting](https://www.paradigm.xyz/2025/12/polymarket-volume-is-being-double-counted)

@@ -97,15 +97,32 @@ export function aggregateFills(
       const noGroup = txGroups.find(g => g.outcome === 'NO');
 
       if (yesGroup && noGroup) {
-        // Determine which is complementary
+        // Determine which is complementary using this priority:
+        // 1. Position data (most reliable - shows actual holdings)
+        // 2. Role preference (maker = intentional order, taker = counterparty appearance)
+        // 3. Larger value (fallback when roles are same)
         if (hasYesPosition && !hasNoPosition) {
           complementaryOutcome = 'NO';
           complementaryValueUsd = noGroup.totalValueUsd;
         } else if (hasNoPosition && !hasYesPosition) {
           complementaryOutcome = 'YES';
           complementaryValueUsd = yesGroup.totalValueUsd;
+        } else if (yesGroup.role !== noGroup.role) {
+          // Different roles: prefer maker (intentional limit orders) over taker
+          // In CLOB cross-matching: maker placed the order, taker is counterparty appearance
+          // Example: Wallet's YES Buy order matched with NO Buy orders
+          //   - Wallet is maker on YES (their order was filled)
+          //   - Wallet is taker on NO (counterparty in the cross-match)
+          //   - Keep YES (maker), filter NO (taker)
+          if (yesGroup.role === 'maker' && noGroup.role === 'taker') {
+            complementaryOutcome = 'NO';
+            complementaryValueUsd = noGroup.totalValueUsd;
+          } else {
+            complementaryOutcome = 'YES';
+            complementaryValueUsd = yesGroup.totalValueUsd;
+          }
         } else {
-          // Fall back to smaller value
+          // Same role on both sides: fall back to smaller value as complementary
           if (yesGroup.totalValueUsd <= noGroup.totalValueUsd) {
             complementaryOutcome = 'YES';
             complementaryValueUsd = yesGroup.totalValueUsd;

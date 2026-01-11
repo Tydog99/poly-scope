@@ -5,7 +5,7 @@
  * Processes wallets from the backfill queue in priority order.
  */
 
-import type { TradeDB, DBTrade, DBAccount } from './index.js';
+import type { TradeDB, DBEnrichedOrderFill, DBAccount } from './index.js';
 import type { SubgraphClient } from '../api/subgraph.js';
 import type { SubgraphTrade } from '../api/types.js';
 
@@ -98,9 +98,9 @@ export async function backfillWallet(
         break;
       }
 
-      // Convert SubgraphTrade[] to DBTrade[]
-      const dbTrades = convertTradesToDBFormat(trades, normalizedWallet);
-      db.saveTrades(dbTrades);
+      // Convert SubgraphTrade[] to DBEnrichedOrderFill[]
+      const dbFills = convertTradesToDBFormat(trades);
+      db.saveFills(dbFills);
 
       // Update cursor to the oldest trade timestamp for next page
       cursor = Math.min(...trades.map(t => t.timestamp));
@@ -121,44 +121,19 @@ export async function backfillWallet(
 }
 
 /**
- * Convert SubgraphTrade[] to DBTrade[] format
- *
- * @param trades - Trades from subgraph
- * @param wallet - Wallet address we're backfilling
- * @returns Trades in database format
+ * Convert SubgraphTrade[] to DBEnrichedOrderFill[] format
  */
-function convertTradesToDBFormat(trades: SubgraphTrade[], wallet: string): DBTrade[] {
-  return trades.map(trade => {
-    const walletLower = wallet.toLowerCase();
-    const isMaker = trade.maker.toLowerCase() === walletLower;
-    const role = isMaker ? 'maker' : 'taker';
-
-    // Determine action: taker's action is opposite of maker's side
-    // If maker is selling, taker is buying (and vice versa)
-    const action = isMaker
-      ? (trade.side === 'Buy' ? 'BUY' : 'SELL')
-      : (trade.side === 'Buy' ? 'SELL' : 'BUY');
-
-    // Parse size and price (stored as strings with 6 decimals in subgraph)
-    const sizeRaw = parseInt(trade.size);
-    const priceRaw = parseFloat(trade.price); // Price is 0-1 decimal
-
-    // For DBTrade, we store size as the USD value (already in 6 decimal format)
-    // and price needs to be converted to 6 decimal integer format
-    const priceInt = Math.round(priceRaw * 1e6);
-
-    return {
-      id: trade.id,
-      txHash: trade.transactionHash,
-      wallet: walletLower,
-      marketId: trade.marketId,
-      timestamp: trade.timestamp,
-      side: trade.side,
-      action,
-      role,
-      size: sizeRaw, // Already in 6 decimal format from subgraph
-      price: priceInt,
-      valueUsd: sizeRaw, // In subgraph, size IS the USD value
-    };
-  });
+function convertTradesToDBFormat(trades: SubgraphTrade[]): DBEnrichedOrderFill[] {
+  return trades.map(trade => ({
+    id: trade.id,
+    transactionHash: trade.transactionHash,
+    timestamp: trade.timestamp,
+    orderHash: (trade as any).orderHash ?? trade.id,
+    side: trade.side,
+    size: parseInt(trade.size),
+    price: Math.round(parseFloat(trade.price) * 1e6),
+    maker: trade.maker.toLowerCase(),
+    taker: trade.taker.toLowerCase(),
+    market: trade.marketId,
+  }));
 }

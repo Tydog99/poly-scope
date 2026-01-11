@@ -47,13 +47,6 @@ export interface Config {
     timeout: number;
     retries: number;
   };
-  /**
-   * Filter trades by participant role to avoid double-counting.
-   * - 'taker': Only taker trades (default, recommended for insider detection)
-   * - 'maker': Only maker trades
-   * - 'both': Include both (may double-count volume)
-   */
-  tradeRole: 'taker' | 'maker' | 'both';
   alertThreshold: number;
   watchlist: string[];
   monitor: MonitorConfig;
@@ -95,7 +88,6 @@ export const DEFAULT_CONFIG: Config = {
     timeout: 30000,
     retries: 2,
   },
-  tradeRole: 'taker', // Default to taker-only to avoid double-counting
   alertThreshold: 70,
   watchlist: [],
   monitor: {
