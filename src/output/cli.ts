@@ -678,10 +678,11 @@ export class CLIReporter {
         const costStr = this.formatUsd(costBasis).padStart(12);
         const pnlColor = tradingPnL >= 0 ? chalk.green : chalk.red;
         const pnlSign = tradingPnL >= 0 ? '+' : '';
-        // Show "held" for positions with no sales (either still holding or redeemed)
+        // Show "—" for positions with no sales (either still holding or redeemed)
         const pnlStr = valueSold > 0
           ? pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12))
-          : chalk.gray('held'.padStart(12));
+          : chalk.dim('—'.padStart(12));
+
         // Shares column - detect sync issue (redeemed but still has shares)
         let sharesStr: string;
         let sharesSuffix = '';
@@ -691,23 +692,20 @@ export class CLIReporter {
           hasUnsyncedPositions = true;
         } else if (netQty > 0) {
           sharesStr = Math.round(netQty).toLocaleString();
-        } else if (redemption > 0) {
-          sharesStr = chalk.gray('redeemed');
-        } else if (valueSold > 0) {
-          sharesStr = chalk.gray('closed');
         } else {
-          sharesStr = chalk.gray('-');
+          // No shares remaining (sold or redeemed)
+          sharesStr = chalk.dim('0');
         }
 
         // Format realized gains (redemption payout for this market)
         const realizedStr = redemption > 0
           ? chalk.green(('+' + this.formatUsd(redemption)).padStart(12))
-          : chalk.gray('-'.padStart(12));
+          : chalk.dim('—'.padStart(12));
 
-        // Format ROI - show "-" if position is still open (no sales, no redemption)
+        // Format ROI - show "—" if position is still open (no sales, no redemption)
         let roiStr: string;
         if (totalReturns === 0) {
-          roiStr = chalk.gray('-'.padStart(10));
+          roiStr = chalk.dim('—'.padStart(10));
         } else {
           const roiColor = roi >= 0 ? chalk.green : chalk.red;
           const roiSign = roi >= 0 ? '+' : '';
