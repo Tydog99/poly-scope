@@ -631,9 +631,9 @@ export class CLIReporter {
 
       // Table header
       lines.push(
-        chalk.gray('  Market                              Cost Basis    Trading P&L      Realized       Shares       ROI')
+        chalk.gray('  Market                                              Cost Basis    Trading P&L      Realized       Shares       ROI')
       );
-      lines.push(chalk.gray('  ' + '─'.repeat(106)));
+      lines.push(chalk.gray('  ' + '─'.repeat(126)));
 
       // Track totals
       let totalCostBasis = 0;
@@ -715,11 +715,11 @@ export class CLIReporter {
         }
 
         const marketDisplay = resolved
-          ? this.truncateQuestion(resolved.question, 30) + chalk.gray(` (${resolved.outcome})`)
+          ? this.truncateQuestion(resolved.question, 50) + chalk.gray(` (${resolved.outcome})`)
           : pos.marketId.slice(0, 16) + '...';
 
         lines.push(
-          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
+          `  ${marketDisplay.padEnd(58)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
         );
       }
 
@@ -729,7 +729,7 @@ export class CLIReporter {
 
       // Summary totals
       lines.push('');
-      lines.push(chalk.gray('  ' + '─'.repeat(106)));
+      lines.push(chalk.gray('  ' + '─'.repeat(126)));
       const totalPnL = totalTradingPnL + totalRealized;
       const totalColor = totalPnL >= 0 ? chalk.green : chalk.red;
       const totalSign = totalPnL >= 0 ? '+' : '';
@@ -743,7 +743,7 @@ export class CLIReporter {
       const totalRoiStr = totalRoiColor((totalRoiSign + totalRoi.toFixed(0) + '%').padStart(10));
 
       lines.push(
-        `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
+        `  ${chalk.bold('TOTALS'.padEnd(58))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
       );
 
       // Footer explaining ** notation
