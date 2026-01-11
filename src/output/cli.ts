@@ -629,9 +629,9 @@ export class CLIReporter {
       lines.push(chalk.bold(`Positions & Realized Gains (${posCount} positions, ${redemptionCount} redemptions):`));
       lines.push('');
 
-      // Table header
+      // Table header - align with data columns (58 market + 12 cost + 12 pnl + 12 realized + 10 shares + 10 roi)
       lines.push(
-        chalk.gray('  Market                                              Cost Basis    Trading P&L      Realized       Shares       ROI')
+        chalk.gray(`  ${'Market'.padEnd(58)} ${'Cost Basis'.padStart(12)}    ${'Trading P&L'.padStart(12)}    ${'Realized'.padStart(12)}    ${'Shares'.padStart(10)}  ${'ROI'.padStart(10)}`)
       );
       lines.push(chalk.gray('  ' + '─'.repeat(126)));
 
@@ -799,6 +799,7 @@ export class CLIReporter {
         const marketDisplay = this.truncateQuestion(question, 50) + chalk.gray(` (${outcomeDisplay})`);
 
         lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
+        lines.push(chalk.gray(`          ${firstTrade.marketId}`));
 
         // Track totals for this market
         let totalBuyValue = 0, totalSellValue = 0, totalFills = 0;
