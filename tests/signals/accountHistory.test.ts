@@ -424,9 +424,9 @@ describe('AccountHistorySignal', () => {
 
       const result = await signal.calculate(trade, context);
 
-      // Should report the historical trade count used for scoring
+      // Should report the historical state was used for scoring
       expect(result.details.totalTrades).toBe(5);
-      expect(result.details.historicalTradeCount).toBe(true);
+      expect(result.details.usingHistoricalState).toBe(true);
     });
   });
 
@@ -460,6 +460,204 @@ describe('AccountHistorySignal', () => {
       expect(result.details.accountAgeDays).toBe(7);
       expect(result.details.totalTrades).toBe(268);
       // Profit score should be 0 since they're at a loss
+      expect(result.details.profitScore).toBe(0);
+    });
+  });
+
+  describe('point-in-time dormancy', () => {
+    it('uses lastTradeTimestamp from historical state', async () => {
+      const tradeDate = new Date('2024-01-15');
+      const trade: AggregatedTrade = {
+        transactionHash: '0xtx1',
+        marketId: 'market1',
+        wallet: '0xwallet',
+        side: 'BUY',
+        outcome: 'YES',
+        totalSize: 1000,
+        totalValueUsd: 500,
+        avgPrice: 0.5,
+        timestamp: tradeDate,
+        fills: [{
+          id: '0xtx1-0',
+          size: 1000,
+          price: 0.5,
+          valueUsd: 500,
+          timestamp: tradeDate.getTime() / 1000,
+        }],
+        fillCount: 1,
+      };
+
+      // Last global trade is Jan 20 (AFTER this trade)
+      // But point-in-time last trade was Jan 1 (BEFORE this trade)
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 50000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-01-20'),  // Global: would give negative dormancy!
+        creationDate: new Date('2023-01-01'),
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 50,
+          volume: 25000000000,
+          pnl: 0,
+          lastTradeTimestamp: new Date('2024-01-01').getTime() / 1000, // 14 days before trade
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should use point-in-time: 14 days dormancy (Jan 1 to Jan 15)
+      // NOT global: -5 days (Jan 20 to Jan 15, which is negative!)
+      expect(result.details.dormancyDays).toBe(14);
+    });
+
+    it('returns 0 dormancy for first trade (no lastTradeTimestamp)', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 50000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date('2023-01-01'),
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 0,    // First trade
+          volume: 0,
+          pnl: 0,
+          // No lastTradeTimestamp - first trade has no prior trades
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // First trade = 0 dormancy (no prior trade to be dormant from)
+      expect(result.details.dormancyDays).toBe(0);
+      expect(result.details.dormancyScore).toBe(0);
+    });
+
+    it('never returns negative dormancy', async () => {
+      const tradeDate = new Date('2024-01-15');
+      const trade: AggregatedTrade = {
+        transactionHash: '0xtx1',
+        marketId: 'market1',
+        wallet: '0xwallet',
+        side: 'BUY',
+        outcome: 'YES',
+        totalSize: 1000,
+        totalValueUsd: 500,
+        avgPrice: 0.5,
+        timestamp: tradeDate,
+        fills: [{
+          id: '0xtx1-0',
+          size: 1000,
+          price: 0.5,
+          valueUsd: 500,
+          timestamp: tradeDate.getTime() / 1000,
+        }],
+        fillCount: 1,
+      };
+
+      // Without historicalState, global lastTradeDate would give negative dormancy
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 50000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-01-20'),  // AFTER trade - would be negative!
+        creationDate: new Date('2023-01-01'),
+      };
+
+      // With proper historicalState, use the last trade BEFORE this one
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 50,
+          volume: 25000000000,
+          pnl: 0,
+          lastTradeTimestamp: new Date('2024-01-10').getTime() / 1000, // 5 days before
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should be 5 days (Jan 10 to Jan 15), not -5 days
+      expect(result.details.dormancyDays).toBeGreaterThanOrEqual(0);
+      expect(result.details.dormancyDays).toBe(5);
+    });
+  });
+
+  describe('point-in-time profit', () => {
+    it('uses point-in-time PnL instead of global profit', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 50000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days old
+        profitUsd: 10000,  // Global: high profit (would score high)
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 5,
+          volume: 5000000000,  // $5000 scaled
+          pnl: 0,             // Point-in-time: no profit yet
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should use point-in-time profit ($0), not global ($10,000)
+      expect(result.details.profitUsd).toBe(0);
+      expect(result.details.profitScore).toBe(0);
+    });
+
+    it('first trade has zero profit', async () => {
+      const trade = makeTrade();
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 50000,
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+        creationDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        profitUsd: 5000,  // Global profit exists
+      };
+
+      const context: SignalContext = {
+        config: DEFAULT_CONFIG,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 0,    // First trade
+          volume: 0,
+          pnl: 0,           // No profit on first trade
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // First trade can't have generated profit yet
+      expect(result.details.profitUsd).toBe(0);
       expect(result.details.profitScore).toBe(0);
     });
   });

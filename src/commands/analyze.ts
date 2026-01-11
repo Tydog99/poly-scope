@@ -352,10 +352,20 @@ export class AnalyzeCommand {
           const tradeTimestamp = trade.timestamp.getTime() / 1000;
           const priorTrades = cachedTrades.filter(t => t.timestamp.getTime() / 1000 < tradeTimestamp);
           const priorVolume = priorTrades.reduce((sum, t) => sum + t.totalValueUsd, 0);
+
+          // Find most recent prior trade for dormancy calculation
+          const lastPriorTrade = priorTrades.length > 0
+            ? priorTrades.reduce((latest, t) =>
+              t.timestamp.getTime() > latest.timestamp.getTime() ? t : latest)
+            : null;
+
           historicalState = {
             tradeCount: priorTrades.length,
             volume: Math.round(priorVolume * 1e6),
-            pnl: 0,
+            pnl: 0, // TODO: Calculate point-in-time PnL from priorTrades
+            lastTradeTimestamp: lastPriorTrade
+              ? Math.floor(lastPriorTrade.timestamp.getTime() / 1000)
+              : undefined,
             approximate: false,
           };
         }

@@ -32,7 +32,7 @@ export class AccountHistorySignal implements Signal {
 
     // Use historical state if available (point-in-time analysis), otherwise fall back to current
     const tradeCount = historicalState?.tradeCount ?? accountHistory.totalTrades;
-    const usingHistoricalTradeCount = historicalState?.tradeCount !== undefined;
+    const usingHistoricalState = historicalState !== undefined;
 
     // Use creationDate from subgraph if available, otherwise fall back to firstTradeDate
     const accountCreationDate = accountHistory.creationDate || accountHistory.firstTradeDate;
@@ -42,17 +42,41 @@ export class AccountHistorySignal implements Signal {
       (trade.timestamp.getTime() - accountCreationDate.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    const dormancyDays = accountHistory.lastTradeDate
-      ? Math.floor(
-        (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) /
-        (1000 * 60 * 60 * 24)
-      )
-      : 0;
+    // Calculate dormancy using point-in-time lastTradeTimestamp if available
+    let dormancyDays: number;
+    if (usingHistoricalState) {
+      // Point-in-time: use last trade before this one (from historicalState)
+      if (historicalState.lastTradeTimestamp) {
+        dormancyDays = Math.floor(
+          (trade.timestamp.getTime() / 1000 - historicalState.lastTradeTimestamp) / (60 * 60 * 24)
+        );
+      } else {
+        // No prior trades = first trade, no dormancy
+        dormancyDays = 0;
+      }
+    } else {
+      // Fallback to global lastTradeDate (may be inaccurate for historical analysis)
+      dormancyDays = accountHistory.lastTradeDate
+        ? Math.floor(
+          (trade.timestamp.getTime() - accountHistory.lastTradeDate.getTime()) /
+          (1000 * 60 * 60 * 24)
+        )
+        : 0;
+    }
 
     // Calculate component scores
     // When we have profit data, use 4 components (each 0-25)
     // Otherwise use 3 components (each 0-33) for backward compatibility
-    const hasProfit = accountHistory.profitUsd !== undefined;
+
+    // Use point-in-time profit if available, otherwise fall back to global
+    const profitUsd = usingHistoricalState
+      ? historicalState.pnl / 1e6  // Point-in-time PnL (may be 0 if not calculated)
+      : accountHistory.profitUsd;
+    const volumeUsd = usingHistoricalState
+      ? historicalState.volume / 1e6  // Point-in-time volume
+      : accountHistory.totalVolumeUsd;
+
+    const hasProfit = profitUsd !== undefined;
 
     let tradeCountScore: number;
     let ageScore: number;
@@ -65,9 +89,9 @@ export class AccountHistorySignal implements Signal {
       ageScore = this.scoreAccountAge(accountAgeDays, maxAccountAgeDays, 25);
       dormancyScore = this.scoreDormancy(dormancyDays, minDormancyDays, 25);
       profitScore = this.scoreProfitOnNewAccount(
-        accountHistory.profitUsd!,
+        profitUsd,
         accountAgeDays,
-        accountHistory.totalVolumeUsd
+        volumeUsd
       );
     } else {
       // 3-component scoring for backward compatibility
@@ -100,13 +124,13 @@ export class AccountHistorySignal implements Signal {
       dataSource: accountHistory.dataSource || 'data-api',
     };
 
-    // Indicate when historical trade count was used
-    if (usingHistoricalTradeCount) {
-      details.historicalTradeCount = true;
+    // Indicate when historical state was used
+    if (usingHistoricalState) {
+      details.usingHistoricalState = true;
     }
 
     if (hasProfit) {
-      details.profitUsd = accountHistory.profitUsd;
+      details.profitUsd = profitUsd;  // Use point-in-time profit
       details.profitScore = Math.round(profitScore);
     }
 

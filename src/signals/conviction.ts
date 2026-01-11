@@ -13,7 +13,26 @@ export class ConvictionSignal implements Signal {
       ? historicalState.volume / 1e6 // Convert from scaled integer
       : (accountHistory?.totalVolumeUsd ?? 0);
 
-    // If no volume history, can't calculate conviction
+    // Point-in-time first trade detection:
+    // If historicalState exists with 0 prior volume, this IS the first trade - 100% concentration
+    const isFirstTrade = historicalState && historicalState.volume === 0;
+
+    if (isFirstTrade) {
+      return {
+        name: this.name,
+        score: 100,
+        weight: this.weight,
+        details: {
+          reason: 'first_trade',
+          tradeValueUsd: trade.totalValueUsd,
+          totalVolumeUsd: trade.totalValueUsd,
+          concentrationPercent: 100,
+          usingHistoricalState: true,
+        },
+      };
+    }
+
+    // If no volume history and no historical state, can't calculate conviction
     if (priorVolume === 0 && (!accountHistory || accountHistory.totalVolumeUsd === 0)) {
       // New wallet with no history - high conviction by default
       return {

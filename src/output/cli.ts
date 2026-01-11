@@ -479,22 +479,27 @@ export class CLIReporter {
       lines.push(chalk.gray(`        ${this.getSignalAbbrev(signal.name)}: ${detailStr}`));
     }
 
-    // Account summary if available
-    if (st.accountHistory) {
-      const h = st.accountHistory;
-      const ageDays = h.creationDate
-        ? Math.floor((Date.now() - h.creationDate.getTime()) / (1000 * 60 * 60 * 24))
-        : h.firstTradeDate
-          ? Math.floor((Date.now() - h.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24))
-          : '?';
+    // Account summary - only show values that were actually used in scoring
+    const acctSignal = st.score.signals.find(s => s.name === 'accountHistory');
+    const acctDetails = acctSignal?.details as Record<string, unknown> | undefined;
+    const convictionSignal = st.score.signals.find(s => s.name === 'conviction');
+    const convictionDetails = convictionSignal?.details as Record<string, unknown> | undefined;
 
-      // Use aggregated volume from conviction signal if available (more accurate than subgraph's collateralVolume)
-      const convictionSignal = st.score.signals.find(s => s.name === 'conviction');
-      const convictionDetails = convictionSignal?.details as Record<string, unknown> | undefined;
-      const aggregatedVolume = convictionDetails?.totalVolumeUsd as number | undefined;
-      const volumeUsd = aggregatedVolume ?? h.totalVolumeUsd;
+    if (acctDetails || convictionDetails) {
+      const tradeCount = acctDetails?.totalTrades as number | undefined;
+      const ageDays = acctDetails?.accountAgeDays as number | undefined;
+      const volumeUsd = convictionDetails?.totalVolumeUsd as number | undefined;
+      const dataSource = acctDetails?.dataSource as string | undefined;
 
-      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(volumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
+      const parts: string[] = [];
+      if (tradeCount !== undefined) parts.push(`${tradeCount} trades`);
+      if (ageDays !== undefined) parts.push(`${ageDays} days old`);
+      if (volumeUsd !== undefined) parts.push(`$${Math.round(volumeUsd).toLocaleString()} volume`);
+      if (dataSource) parts.push(`[${dataSource}]`);
+
+      if (parts.length > 0) {
+        lines.push(chalk.gray(`        Account: ${parts.join(', ')}`));
+      }
     }
 
     return lines.join('\n');

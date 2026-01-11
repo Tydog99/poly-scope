@@ -136,5 +136,66 @@ describe('ConvictionSignal', () => {
       // 5000 / 100000 = 5% concentration
       expect(result.details.concentrationPercent).toBe(5);
     });
+
+    it('returns max score for first trade (zero prior volume)', async () => {
+      const trade = makeTrade(5000);
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,           // Global: many trades now
+        totalVolumeUsd: 50000,      // Global: high volume now
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+      };
+
+      const context: SignalContext = {
+        config,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 0,    // First trade - no prior trades
+          volume: 0,        // First trade - no prior volume
+          pnl: 0,
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // First trade should be 100% concentration, max score
+      expect(result.score).toBe(100);
+      expect(result.details.reason).toBe('first_trade');
+      expect(result.details.concentrationPercent).toBe(100);
+      expect(result.details.usingHistoricalState).toBe(true);
+    });
+
+    it('does not fall back to global volume for first trade', async () => {
+      // This tests the bug fix: previously, first trades would use global volume
+      // instead of recognizing it as 100% concentration
+      const trade = makeTrade(5000);
+      const history: AccountHistory = {
+        wallet: '0x123',
+        totalTrades: 100,
+        totalVolumeUsd: 100000,     // Global volume is high - would be 5% if used
+        firstTradeDate: new Date('2023-01-01'),
+        lastTradeDate: new Date('2024-12-01'),
+      };
+
+      const context: SignalContext = {
+        config,
+        accountHistory: history,
+        historicalState: {
+          tradeCount: 0,
+          volume: 0,        // First trade
+          pnl: 0,
+          approximate: false,
+        },
+      };
+
+      const result = await signal.calculate(trade, context);
+
+      // Should NOT use global volume (which would give 5% concentration)
+      // Should recognize this as first trade with 100% concentration
+      expect(result.details.concentrationPercent).toBe(100);
+      expect(result.details.totalVolumeUsd).toBe(5000); // trade value, not global
+    });
   });
 });
