@@ -85,7 +85,6 @@ export class AnalyzeCommand {
 
     // 2. Fetch trades
     let allTrades: Trade[];
-    const role = options.role ?? this.config.tradeRole;
 
     // WALLET MODE: Query wallet's trades directly from subgraph (bypasses cache/limit issues)
     if (options.wallet && this.subgraphClient) {
@@ -172,7 +171,6 @@ export class AnalyzeCommand {
           after: options.after,
           before: options.before,
           maxTrades: options.maxTrades,
-          role,
         });
       }
     }
@@ -301,12 +299,13 @@ export class AnalyzeCommand {
         const tokenIds = [...new Set(fills.map(f => f.market))];
         const markets = this.tradeDb.getMarketsForTokenIds(tokenIds);
 
-        // Build tokenToOutcome map
+        // Build tokenToOutcome map using outcomeIndex (0 = YES, 1 = NO)
+        // This is more reliable than string matching for non-binary markets (e.g., "Up"/"Down")
         const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
         for (const tokenId of tokenIds) {
           const market = markets.get(tokenId);
           tokenToOutcome.set(tokenId.toLowerCase(),
-            market?.outcome?.toUpperCase() === 'YES' ? 'YES' : 'NO');
+            market?.outcomeIndex === 0 ? 'YES' : 'NO');
         }
 
         // Convert to SubgraphTrade format

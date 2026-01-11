@@ -474,6 +474,51 @@ describe('DB Integration', () => {
       expect(state.approximate).toBe(true);
     });
 
+    it('uses outcomeIndex for YES/NO mapping (not string matching)', () => {
+      // Non-binary market with outcomes like "Up"/"Down" instead of "Yes"/"No"
+      // outcomeIndex 0 = YES side (first outcome), outcomeIndex 1 = NO side (second outcome)
+      db.saveMarkets([
+        { tokenId: 'token-up', conditionId: 'cond-range', question: 'Price range?', outcome: 'Up', outcomeIndex: 0, resolvedAt: null },
+        { tokenId: 'token-down', conditionId: 'cond-range', question: 'Price range?', outcome: 'Down', outcomeIndex: 1, resolvedAt: null },
+      ]);
+
+      // Wallet buys both "Up" (YES side) and "Down" (NO side) in same tx
+      db.saveFills([
+        {
+          id: 'fill-up',
+          transactionHash: '0xtx-range',
+          timestamp: 1000,
+          orderHash: '0xo1',
+          side: 'Sell',
+          size: 5000000000, // $5000 "Up" (larger = primary)
+          price: 100000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-up',
+        },
+        {
+          id: 'fill-down',
+          transactionHash: '0xtx-range',
+          timestamp: 1000,
+          orderHash: '0xo2',
+          side: 'Sell',
+          size: 500000000, // $500 "Down" (smaller = complementary)
+          price: 900000,
+          maker: '0xmarket',
+          taker: '0xtrader',
+          market: 'token-down',
+        },
+      ]);
+
+      const state = db.getAccountStateAt('0xtrader', 2000);
+
+      // If using string matching, both "Up" and "Down" would map to YES (neither === "Yes")
+      // and complementary filtering wouldn't work. With outcomeIndex, "Up" is YES, "Down" is NO.
+      // Should correctly filter "Down" as complementary and count only $5000.
+      expect(state.volume).toBe(5000000000);
+      expect(state.tradeCount).toBe(1);
+    });
+
     it('excludes fills at the exact query timestamp (exclusive before)', () => {
       // This tests that getAccountStateAt uses < not <= for timestamp
       // We want the state BEFORE the trade, not including it

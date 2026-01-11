@@ -353,9 +353,11 @@ export class TradeDB {
 
     for (const tokenId of tokenIds) {
       const market = markets.get(tokenId);
-      if (market && market.outcome) {
+      if (market && market.outcomeIndex !== null) {
+        // Use outcomeIndex (0 = YES, 1 = NO) - more reliable than string matching
+        // for non-binary markets (e.g., "Up"/"Down")
         tokenToOutcome.set(tokenId.toLowerCase(),
-          market.outcome.toUpperCase() === 'YES' ? 'YES' : 'NO');
+          market.outcomeIndex === 0 ? 'YES' : 'NO');
       } else {
         marketsNotFound.push(tokenId);
         // Default to YES if market not found (graceful degradation)

@@ -7,7 +7,7 @@ Last updated: 2026-01-09
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 324 tests passing across 26 test files
+- **Test Status**: All 353 tests passing across 27 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -141,7 +141,7 @@ Last updated: 2026-01-09
 
 ## 2. Test Coverage Analysis
 
-### Test Suite (281 tests across 24 files)
+### Test Suite (353 tests across 27 files)
 
 | Module | Tests | Status | Notes |
 |--------|-------|--------|-------|
@@ -260,7 +260,7 @@ Historical analysis now uses **point-in-time account state** from the database i
 
 ### Strengths
 - Clean architecture - Separation of concerns (api, signals, commands, output)
-- Comprehensive test suite - 77 tests with integration tests
+- Comprehensive test suite - 353 tests with integration tests
 - Error handling - Graceful fallbacks between data sources
 - Configuration - Flexible config system with CLI overrides
 - Documentation - Extensive README with limitations documented
@@ -308,7 +308,7 @@ Historical analysis now uses **point-in-time account state** from the database i
 | Point-in-time analysis | Working | Via `getAccountStateAt()` queries |
 | Background backfill | Working | Priority queue with opportunistic fetching |
 | Configuration system | Working | CLI overrides supported |
-| Test suite | Working | 281/281 passing |
+| Test suite | Working | 353/353 passing |
 | Build process | Working | Zero TypeScript errors |
 | Cross-market analysis | Not implemented | Planned feature |
 | Whale following signal | Not implemented | Planned feature |
@@ -361,7 +361,7 @@ src/
 ├── config.ts         - Configuration system
 └── index.ts          - CLI entry point
 
-tests/ (23 test files, 257 tests)
+tests/ (27 test files, 353 tests)
 scripts/ (2 utilities)
 docs/ (Planning documents)
 .data/ (SQLite database - gitignored)
