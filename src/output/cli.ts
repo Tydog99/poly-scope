@@ -712,12 +712,17 @@ export class CLIReporter {
           roiStr = roiColor((roiSign + roi.toFixed(0) + '%').padStart(10));
         }
 
-        const marketDisplay = resolved
-          ? this.truncateQuestion(resolved.question, 50) + chalk.gray(` (${resolved.outcome})`)
+        // Build market display with manual padding (chalk codes break padEnd)
+        const truncatedQuestion = resolved
+          ? this.truncateQuestion(resolved.question, 50)
           : pos.marketId.slice(0, 16) + '...';
+        const outcomeSuffix = resolved ? ` (${resolved.outcome})` : '';
+        const visibleLength = truncatedQuestion.length + outcomeSuffix.length;
+        const padding = ' '.repeat(Math.max(0, 58 - visibleLength));
+        const marketDisplay = truncatedQuestion + chalk.gray(outcomeSuffix) + padding;
 
         lines.push(
-          `  ${marketDisplay.padEnd(58)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
+          `  ${marketDisplay} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
         );
       }
 
