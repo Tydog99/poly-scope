@@ -87,6 +87,16 @@ export interface BackfillQueueItem {
   completedAt: number | null;
 }
 
+export interface DBPricePoint {
+  timestamp: number;
+  price: number;  // 0-1 decimal
+}
+
+export interface PriceSyncStatus {
+  syncedFrom?: number;
+  syncedTo?: number;
+}
+
 export class TradeDB {
   private db: Database.Database;
   private dbPath: string;
@@ -571,5 +581,52 @@ export class TradeDB {
   hasQueuedBackfill(wallet: string): boolean {
     return this.db.prepare(`SELECT 1 FROM backfill_queue WHERE wallet = ? AND completed_at IS NULL`)
       .get(wallet.toLowerCase()) !== undefined;
+  }
+
+  savePrices(tokenId: string, prices: DBPricePoint[]): number {
+    if (prices.length === 0) return 0;
+
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO price_history (token_id, timestamp, price)
+      VALUES (?, ?, ?)
+    `);
+
+    let inserted = 0;
+
+    const insertMany = this.db.transaction((prices: DBPricePoint[]) => {
+      for (const p of prices) {
+        // Store price as 6-decimal scaled integer
+        const result = stmt.run(tokenId, p.timestamp, Math.round(p.price * 1e6));
+        inserted += result.changes;
+      }
+    });
+
+    insertMany(prices);
+    return inserted;
+  }
+
+  getPricesForToken(tokenId: string, startTs: number, endTs: number): DBPricePoint[] {
+    const rows = this.db.prepare(`
+      SELECT timestamp, price FROM price_history
+      WHERE token_id = ? AND timestamp >= ? AND timestamp <= ?
+      ORDER BY timestamp ASC
+    `).all(tokenId, startTs, endTs) as { timestamp: number; price: number }[];
+
+    return rows.map(r => ({
+      timestamp: r.timestamp,
+      price: r.price / 1e6,  // Convert back to 0-1 decimal
+    }));
+  }
+
+  getPriceSyncStatus(tokenId: string): PriceSyncStatus {
+    const row = this.db.prepare(`
+      SELECT MIN(timestamp) as syncedFrom, MAX(timestamp) as syncedTo
+      FROM price_history WHERE token_id = ?
+    `).get(tokenId) as { syncedFrom: number | null; syncedTo: number | null } | undefined;
+
+    return {
+      syncedFrom: row?.syncedFrom ?? undefined,
+      syncedTo: row?.syncedTo ?? undefined,
+    };
   }
 }
