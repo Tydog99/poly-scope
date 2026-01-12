@@ -7,7 +7,7 @@ Last updated: 2026-01-11
 ### Core Architecture
 - **Project**: TypeScript CLI tool for detecting insider trading on Polymarket
 - **Build Status**: Compiles cleanly with `npm run build` (0 TypeScript errors)
-- **Test Status**: All 353 tests passing across 27 test files
+- **Test Status**: All 391 tests passing across 30 test files
 - **Code Size**: 2,352 lines of source code (38 TypeScript files)
 
 ### Implemented Commands (4)
@@ -523,3 +523,4 @@ docs/ (Planning documents)
 | 2026-01-09 | **Added TradeCacheChecker class** (`src/api/trade-cache.ts`): Determines cache coverage for market trades - returns `missing`, `stale`, `partial-older`, `partial-newer`, or `none` with recommended fetch ranges |
 | 2026-01-09 | **Implemented DB-first trade fetching in analyze command**: Now checks DB cache first before subgraph; only fetches missing/stale data; updates sync watermarks after each fetch; 1-hour freshness TTL; 43 new tests added (324 total) |
 | 2026-01-11 | **Added price_history table schema**: New SQLite table for caching CLOB price history data with token_id + timestamp composite primary key; enables market impact calculation |
+| 2026-01-11 | **Added PriceFetcher module** (`src/api/prices.ts`): Fetches price history from CLOB API with DB-first caching; `fetchFromApi()` for direct API calls, `getPricesForToken()` with automatic caching, `getPricesForMarket()` for batch fetching; graceful degradation on API errors; 13 unit tests |
