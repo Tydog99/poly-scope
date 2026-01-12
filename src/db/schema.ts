@@ -73,12 +73,21 @@ export function initializeSchema(db: Database.Database): void {
       completed_at INTEGER
     );
 
+    -- Price history for market impact calculation
+    CREATE TABLE IF NOT EXISTS price_history (
+      token_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      price INTEGER NOT NULL,
+      PRIMARY KEY (token_id, timestamp)
+    );
+
     -- Indexes for fast queries
     CREATE INDEX IF NOT EXISTS idx_fills_maker_time ON enriched_order_fills(maker, timestamp);
     CREATE INDEX IF NOT EXISTS idx_fills_taker_time ON enriched_order_fills(taker, timestamp);
     CREATE INDEX IF NOT EXISTS idx_fills_market ON enriched_order_fills(market, timestamp);
     CREATE INDEX IF NOT EXISTS idx_fills_tx ON enriched_order_fills(transaction_hash);
     CREATE INDEX IF NOT EXISTS idx_redemptions_wallet ON redemptions(wallet);
+    CREATE INDEX IF NOT EXISTS idx_prices_token_time ON price_history(token_id, timestamp);
   `);
 
   // Run migrations for existing databases

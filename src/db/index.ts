@@ -12,6 +12,7 @@ export interface DBStatus {
   redemptions: number;
   markets: number;
   backfillQueue: number;
+  priceHistory: number;
 }
 
 export interface DBEnrichedOrderFill {
@@ -119,6 +120,7 @@ export class TradeDB {
       redemptions: count('redemptions'),
       markets: count('markets'),
       backfillQueue: count('backfill_queue'),
+      priceHistory: count('price_history'),
     };
   }
 

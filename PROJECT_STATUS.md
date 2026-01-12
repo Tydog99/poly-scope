@@ -113,7 +113,8 @@ Last updated: 2026-01-11
 - `redemptions` - Winning token redemptions with payout amounts
 - `markets` - Token ID to condition ID mapping with sync watermarks (synced_from/to/at, has_complete_history)
 - `backfill_queue` - Pending wallet backfill requests with priority
-- `schema_version` - Database migration tracking (current version: 2)
+- `price_history` - Token price history for market impact calculation (token_id + timestamp composite PK)
+- `schema_version` - Database migration tracking (current version: 3)
 
 **Key Features**:
 - **Point-in-Time Queries**: `getAccountStateAt(wallet, timestamp)` computes trade count, volume, and P&L at any historical moment
@@ -521,3 +522,4 @@ docs/ (Planning documents)
 | 2026-01-09 | **Added market sync methods to TradeDB**: `getMarketSync(tokenId)` retrieves sync status, `updateMarketSync(tokenId, {...})` updates watermarks; enhanced `getTradesForMarket()` with after/before/role/limit filtering |
 | 2026-01-09 | **Added TradeCacheChecker class** (`src/api/trade-cache.ts`): Determines cache coverage for market trades - returns `missing`, `stale`, `partial-older`, `partial-newer`, or `none` with recommended fetch ranges |
 | 2026-01-09 | **Implemented DB-first trade fetching in analyze command**: Now checks DB cache first before subgraph; only fetches missing/stale data; updates sync watermarks after each fetch; 1-hour freshness TTL; 43 new tests added (324 total) |
+| 2026-01-11 | **Added price_history table schema**: New SQLite table for caching CLOB price history data with token_id + timestamp composite primary key; enables market impact calculation |
