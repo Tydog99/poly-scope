@@ -238,6 +238,8 @@ export class CLIReporter {
         const reason = details.reason as string | undefined;
         if (reason === 'no_history') {
           lines.push(chalk.red(`    - NEW ACCOUNT - no trading history found`));
+        } else if (reason === 'skipped_budget') {
+          lines.push(chalk.yellow(`    - Account history not fetched (budget limit)`));
         } else {
           const totalTrades = details.totalTrades as number | undefined;
           const ageDays = details.accountAgeDays as number | undefined;
@@ -248,9 +250,9 @@ export class CLIReporter {
           const dormancyScore = details.dormancyScore as number | undefined;
           const profitScore = details.profitScore as number | undefined;
 
-          lines.push(chalk.gray(`    - Trade count: ${totalTrades || '?'} -> ${tradeCountScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Account age: ${ageDays || '?'} days -> ${ageScore ?? '?'} pts`));
-          lines.push(chalk.gray(`    - Dormancy: ${dormancy || 0} days idle -> ${dormancyScore ?? 0} pts`));
+          lines.push(chalk.gray(`    - Trade count: ${totalTrades ?? '?'} -> ${tradeCountScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Account age: ${ageDays ?? '?'} days -> ${ageScore ?? '?'} pts`));
+          lines.push(chalk.gray(`    - Dormancy: ${dormancy ?? 0} days idle -> ${dormancyScore ?? 0} pts`));
           if (profitUsd !== undefined && profitScore !== undefined) {
             lines.push(chalk.gray(`    - Profit on new account: ${this.formatUsd(profitUsd)} -> ${profitScore} pts`));
           } else {
@@ -264,7 +266,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
 
           lines.push(chalk.gray(`    - Trade concentration: ${tradePct?.toFixed(1) || '?'}% of volume -> ${signal.score} pts`));
           lines.push(chalk.gray(`      (${this.formatUsd(tradeValue || 0)} trade / ${this.formatUsd(totalVolume || 0)} total)`));
@@ -359,7 +361,7 @@ export class CLIReporter {
       String(convScore).padStart(4),
       chalk.gray(this.formatTime(st.trade.timestamp)),
       walletColor(this.formatWalletLink(st.trade.wallet)),
-      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
+      `${st.trade.side.padEnd(4)} ${st.trade.outcome.padEnd(3)} ${this.formatUsd(st.trade.totalValueUsd).padStart(10)} @${st.trade.avgPrice.toFixed(2)}`,
       tags,
     ];
 
@@ -442,8 +444,8 @@ export class CLIReporter {
         const sizeScore = details.sizeScore as number | undefined;
         const impactScore = details.impactScore as number | undefined;
         detailStr = `value=$${Math.round(valueUsd || 0).toLocaleString()}, ` +
-          `impact=${impactPct?.toFixed(1) || '?'}%, ` +
-          `sizeScore=${sizeScore || '?'}, impactScore=${impactScore || '?'}`;
+          `impact=${impactPct?.toFixed(1) ?? '?'}%, ` +
+          `sizeScore=${sizeScore ?? '?'}, impactScore=${impactScore ?? '?'}`;
       } else if (signal.name === 'accountHistory') {
         const reason = details.reason as string | undefined;
         if (reason === 'skipped_budget') {
@@ -456,8 +458,8 @@ export class CLIReporter {
           const dormancy = details.dormancyDays as number | undefined;
           const dataSource = details.dataSource as string | undefined;
           const profitUsd = details.profitUsd as number | undefined;
-          detailStr = `trades=${totalTrades || '?'}, age=${ageDays || '?'}d, ` +
-            `dormancy=${dormancy || 0}d` +
+          detailStr = `trades=${totalTrades ?? '?'}, age=${ageDays ?? '?'}d, ` +
+            `dormancy=${dormancy ?? 0}d` +
             (profitUsd !== undefined ? `, profit=$${Math.round(profitUsd).toLocaleString()}` : '') +
             ` [${dataSource || '?'}]`;
         }
@@ -468,7 +470,7 @@ export class CLIReporter {
         } else {
           const tradeValue = details.tradeValueUsd as number | undefined;
           const totalVolume = details.totalVolumeUsd as number | undefined;
-          const tradePct = details.tradePercent as number | undefined;
+          const tradePct = details.concentrationPercent as number | undefined;
           detailStr = `trade=$${Math.round(tradeValue || 0).toLocaleString()} / ` +
             `total=$${Math.round(totalVolume || 0).toLocaleString()} = ${tradePct?.toFixed(1) || '?'}%`;
         }
@@ -477,15 +479,27 @@ export class CLIReporter {
       lines.push(chalk.gray(`        ${this.getSignalAbbrev(signal.name)}: ${detailStr}`));
     }
 
-    // Account summary if available
-    if (st.accountHistory) {
-      const h = st.accountHistory;
-      const ageDays = h.creationDate
-        ? Math.floor((Date.now() - h.creationDate.getTime()) / (1000 * 60 * 60 * 24))
-        : h.firstTradeDate
-          ? Math.floor((Date.now() - h.firstTradeDate.getTime()) / (1000 * 60 * 60 * 24))
-          : '?';
-      lines.push(chalk.gray(`        Account: ${h.totalTrades} trades, ${ageDays} days old, $${Math.round(h.totalVolumeUsd).toLocaleString()} volume [${h.dataSource || 'unknown'}]`));
+    // Account summary - only show values that were actually used in scoring
+    const acctSignal = st.score.signals.find(s => s.name === 'accountHistory');
+    const acctDetails = acctSignal?.details as Record<string, unknown> | undefined;
+    const convictionSignal = st.score.signals.find(s => s.name === 'conviction');
+    const convictionDetails = convictionSignal?.details as Record<string, unknown> | undefined;
+
+    if (acctDetails || convictionDetails) {
+      const tradeCount = acctDetails?.totalTrades as number | undefined;
+      const ageDays = acctDetails?.accountAgeDays as number | undefined;
+      const volumeUsd = convictionDetails?.totalVolumeUsd as number | undefined;
+      const dataSource = acctDetails?.dataSource as string | undefined;
+
+      const parts: string[] = [];
+      if (tradeCount !== undefined) parts.push(`${tradeCount} trades`);
+      if (ageDays !== undefined) parts.push(`${ageDays} days old`);
+      if (volumeUsd !== undefined) parts.push(`$${Math.round(volumeUsd).toLocaleString()} volume`);
+      if (dataSource) parts.push(`[${dataSource}]`);
+
+      if (parts.length > 0) {
+        lines.push(chalk.gray(`        Account: ${parts.join(', ')}`));
+      }
     }
 
     return lines.join('\n');
@@ -620,11 +634,11 @@ export class CLIReporter {
       lines.push(chalk.bold(`Positions & Realized Gains (${posCount} positions, ${redemptionCount} redemptions):`));
       lines.push('');
 
-      // Table header
+      // Table header - align with data columns (58 market + 12 cost + 12 pnl + 12 realized + 14 shares + 10 roi)
       lines.push(
-        chalk.gray('  Market                              Cost Basis    Trading P&L      Realized       Shares       ROI')
+        chalk.gray(`  ${'Market'.padEnd(58)} ${'Cost Basis'.padStart(12)}    ${'Trading P&L'.padStart(12)}    ${'Realized'.padStart(12)}    ${'Shares'.padStart(14)}  ${'ROI'.padStart(10)}`)
       );
-      lines.push(chalk.gray('  ' + '─'.repeat(106)));
+      lines.push(chalk.gray('  ' + '─'.repeat(130)));
 
       // Track totals
       let totalCostBasis = 0;
@@ -669,48 +683,51 @@ export class CLIReporter {
         const costStr = this.formatUsd(costBasis).padStart(12);
         const pnlColor = tradingPnL >= 0 ? chalk.green : chalk.red;
         const pnlSign = tradingPnL >= 0 ? '+' : '';
-        // Show "held" for positions with no sales (either still holding or redeemed)
+        // Show "—" for positions with no sales (either still holding or redeemed)
         const pnlStr = valueSold > 0
           ? pnlColor((pnlSign + this.formatUsd(tradingPnL)).padStart(12))
-          : chalk.gray('held'.padStart(12));
+          : chalk.dim('—'.padStart(12));
+
         // Shares column - detect sync issue (redeemed but still has shares)
-        let sharesStr: string;
-        let sharesSuffix = '';
+        // Pad raw values BEFORE applying chalk (ANSI codes break padStart)
+        let sharesDisplay: string;
         if (redemption > 0 && netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString();
-          sharesSuffix = chalk.yellow('**');
+          const raw = Math.round(netQty).toLocaleString() + '**';
+          sharesDisplay = raw.padStart(14).replace('**', chalk.yellow('**'));
           hasUnsyncedPositions = true;
         } else if (netQty > 0) {
-          sharesStr = Math.round(netQty).toLocaleString();
-        } else if (redemption > 0) {
-          sharesStr = chalk.gray('redeemed');
-        } else if (valueSold > 0) {
-          sharesStr = chalk.gray('closed');
+          sharesDisplay = Math.round(netQty).toLocaleString().padStart(14);
         } else {
-          sharesStr = chalk.gray('-');
+          // No shares remaining (sold or redeemed)
+          sharesDisplay = chalk.dim('0'.padStart(14));
         }
 
         // Format realized gains (redemption payout for this market)
         const realizedStr = redemption > 0
           ? chalk.green(('+' + this.formatUsd(redemption)).padStart(12))
-          : chalk.gray('-'.padStart(12));
+          : chalk.dim('—'.padStart(12));
 
-        // Format ROI - show "-" if position is still open (no sales, no redemption)
+        // Format ROI - show "—" if position is still open (no sales, no redemption)
         let roiStr: string;
         if (totalReturns === 0) {
-          roiStr = chalk.gray('-'.padStart(10));
+          roiStr = chalk.dim('—'.padStart(10));
         } else {
           const roiColor = roi >= 0 ? chalk.green : chalk.red;
           const roiSign = roi >= 0 ? '+' : '';
           roiStr = roiColor((roiSign + roi.toFixed(0) + '%').padStart(10));
         }
 
-        const marketDisplay = resolved
-          ? this.truncateQuestion(resolved.question, 30) + chalk.gray(` (${resolved.outcome})`)
+        // Build market display with manual padding (chalk codes break padEnd)
+        const truncatedQuestion = resolved
+          ? this.truncateQuestion(resolved.question, 50)
           : pos.marketId.slice(0, 16) + '...';
+        const outcomeSuffix = resolved ? ` (${resolved.outcome})` : '';
+        const visibleLength = truncatedQuestion.length + outcomeSuffix.length;
+        const padding = ' '.repeat(Math.max(0, 58 - visibleLength));
+        const marketDisplay = truncatedQuestion + chalk.gray(outcomeSuffix) + padding;
 
         lines.push(
-          `  ${marketDisplay.padEnd(38)} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesStr.padStart(10)}${sharesSuffix}  ${roiStr}`
+          `  ${marketDisplay} ${costStr}    ${pnlStr}    ${realizedStr}    ${sharesDisplay}  ${roiStr}`
         );
       }
 
@@ -720,7 +737,7 @@ export class CLIReporter {
 
       // Summary totals
       lines.push('');
-      lines.push(chalk.gray('  ' + '─'.repeat(106)));
+      lines.push(chalk.gray('  ' + '─'.repeat(130)));
       const totalPnL = totalTradingPnL + totalRealized;
       const totalColor = totalPnL >= 0 ? chalk.green : chalk.red;
       const totalSign = totalPnL >= 0 ? '+' : '';
@@ -734,7 +751,7 @@ export class CLIReporter {
       const totalRoiStr = totalRoiColor((totalRoiSign + totalRoi.toFixed(0) + '%').padStart(10));
 
       lines.push(
-        `  ${chalk.bold('TOTALS'.padEnd(38))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
+        `  ${chalk.bold('TOTALS'.padEnd(58))} ${this.formatUsd(totalCostBasis).padStart(12)}    ${tradingColor((tradingSign + this.formatUsd(totalTradingPnL)).padStart(12))}    ${chalk.green(('+' + this.formatUsd(totalRealized)).padStart(12))}    ${totalColor(chalk.bold((totalSign + this.formatUsd(totalPnL) + ' net').padStart(14)))}  ${totalRoiStr}`
       );
 
       // Footer explaining ** notation
@@ -787,6 +804,9 @@ export class CLIReporter {
         const marketDisplay = this.truncateQuestion(question, 50) + chalk.gray(` (${outcomeDisplay})`);
 
         lines.push(`  ${chalk.bold.cyan('Market:')} ${marketDisplay} ${chalk.gray(`(${trades.length} txns)`)}`);
+        // Show condition ID (market slug ID) if available, otherwise token ID
+        const marketIdDisplay = resolved?.conditionId ?? firstTrade.marketId;
+        lines.push(chalk.gray(`          ${marketIdDisplay}`));
 
         // Track totals for this market
         let totalBuyValue = 0, totalSellValue = 0, totalFills = 0;
@@ -923,7 +943,7 @@ export class CLIReporter {
       String(convScore).padStart(4),
       chalk.gray(timeStr),
       marketDisplay.padEnd(36),
-      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
+      `${st.trade.side.padEnd(4)} ${st.trade.outcome.padEnd(3)} ${this.formatUsd(st.trade.totalValueUsd).padStart(10)} @${st.trade.avgPrice.toFixed(2)}`,
     ];
 
     return '  ' + cols.join('  ');

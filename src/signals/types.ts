@@ -28,6 +28,7 @@ export interface SignalContext {
     tradeCount: number;
     volume: number;
     pnl: number;
+    lastTradeTimestamp?: number; // Unix timestamp of last trade before this one
     approximate: boolean;
   };
 }

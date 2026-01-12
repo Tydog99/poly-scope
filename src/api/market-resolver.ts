@@ -161,6 +161,27 @@ export class MarketResolver {
   }
 }
 
+/**
+ * Save resolved tokens to a TradeDB instance
+ */
+export function saveResolvedMarketsToDb(
+  resolved: Map<string, ResolvedToken>,
+  db: import('../db/index.js').TradeDB
+): number {
+  const markets: import('../db/index.js').DBMarket[] = [];
+  for (const [, token] of resolved) {
+    markets.push({
+      tokenId: token.tokenId,
+      conditionId: token.conditionId,
+      question: token.question,
+      outcome: token.outcome,
+      outcomeIndex: token.outcomeIndex,
+      resolvedAt: null, // We don't have this info from Gamma API
+    });
+  }
+  return db.saveMarkets(markets);
+}
+
 // Singleton instance for convenience
 let defaultResolver: MarketResolver | null = null;
 

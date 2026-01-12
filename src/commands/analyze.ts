@@ -7,10 +7,12 @@ import { TradeSizeSignal, AccountHistorySignal, ConvictionSignal, SignalAggregat
 import { TradeClassifier } from '../signals/classifier.js';
 import type { Trade, SignalContext } from '../signals/types.js';
 import type { AnalysisReport, SuspiciousTrade } from '../output/types.js';
-import { getMarketResolver } from '../api/market-resolver.js';
+import { getMarketResolver, saveResolvedMarketsToDb } from '../api/market-resolver.js';
 import { aggregateFills } from '../api/aggregator.js';
-import type { Market, SubgraphTrade } from '../api/types.js';
+import type { Market, SubgraphTrade, MarketToken, AggregatedTrade } from '../api/types.js';
 import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
+import { TradeDB, type DBEnrichedOrderFill } from '../db/index.js';
+import { TradeCacheChecker, type FetchReason } from '../api/trade-cache.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -38,6 +40,7 @@ export class AnalyzeCommand {
   private tradeFetcher: TradeFetcher;
   private accountFetcher: AccountFetcher;
   private subgraphClient: SubgraphClient | null;
+  private tradeDb: TradeDB;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
   private classifier: TradeClassifier;
@@ -57,11 +60,15 @@ export class AnalyzeCommand {
       }
     }
 
+    // Initialize database for account caching
+    this.tradeDb = new TradeDB();
+
     this.tradeFetcher = new TradeFetcher({
       subgraphClient: this.subgraphClient,
     });
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
+      tradeDb: this.tradeDb,
     });
     this.signals = [
       new TradeSizeSignal(),
@@ -78,7 +85,6 @@ export class AnalyzeCommand {
 
     // 2. Fetch trades
     let allTrades: Trade[];
-    const role = options.role ?? this.config.tradeRole;
 
     // WALLET MODE: Query wallet's trades directly from subgraph (bypasses cache/limit issues)
     if (options.wallet && this.subgraphClient) {
@@ -110,6 +116,11 @@ export class AnalyzeCommand {
       const resolvedTokens = await resolver.resolveBatch(marketTokenIds);
       const tokenToOutcome = buildTokenToOutcomeFromResolved(resolvedTokens);
 
+      // Save resolved markets to DB
+      if (resolvedTokens.size > 0) {
+        saveResolvedMarketsToDb(resolvedTokens, this.tradeDb);
+      }
+
       // Fetch positions to determine which token wallet has position in
       const positions = await this.subgraphClient.getPositions(options.wallet);
 
@@ -122,14 +133,25 @@ export class AnalyzeCommand {
 
       console.log(`Aggregated to ${allTrades.length} non-complementary transactions`);
     } else {
-      // NORMAL MODE: Fetch raw fills from subgraph, then aggregate per wallet
+      // NORMAL MODE: Check DB cache first, then fetch from subgraph if needed
       const hasTokens = market.tokens && market.tokens.length > 0;
 
       if (this.subgraphClient && hasTokens) {
         const tokenToOutcome = buildTokenToOutcome(market);
 
-        // Get raw fills (not pre-aggregated) for aggregation
-        const rawFills = await this.fetchRawFills(market, options);
+        // Save market tokens to DB (metadata only, sync status preserved)
+        const dbMarkets: import('../db/index.js').DBMarket[] = market.tokens.map((t, i) => ({
+          tokenId: t.tokenId,
+          conditionId: market.conditionId || null,
+          question: market.question || null,
+          outcome: t.outcome || null,
+          outcomeIndex: i,
+          resolvedAt: null,
+        }));
+        this.tradeDb.saveMarkets(dbMarkets);
+
+        // DB-first: Check cache coverage and fetch only what's needed
+        const rawFills = await this.fetchRawFillsWithCache(market, options);
 
         if (rawFills.length > 0) {
           // Aggregate fills per wallet to handle:
@@ -137,7 +159,8 @@ export class AnalyzeCommand {
           // 2. Maker/taker double-counting -> pick higher value role
           // 3. Complementary trades (YES+NO in same tx) -> filter smaller side
           allTrades = aggregateFillsPerWallet(rawFills, tokenToOutcome);
-          console.log(`Aggregated ${rawFills.length} fills to ${allTrades.length} trades`);
+          const uniqueWallets = new Set(allTrades.map(t => t.wallet)).size;
+          console.log(`Processed ${rawFills.length} fills → ${allTrades.length} trades across ${uniqueWallets} wallets`);
         } else {
           allTrades = [];
         }
@@ -148,7 +171,6 @@ export class AnalyzeCommand {
           after: options.after,
           before: options.before,
           maxTrades: options.maxTrades,
-          role,
         });
       }
     }
@@ -260,6 +282,51 @@ export class AnalyzeCommand {
       console.log(`Phase 2: No candidate wallets to fetch`);
     }
 
+    // === PRE-COMPUTE: Build aggregated trade cache for candidate wallets ===
+    // This avoids O(n) expensive getAccountStateAt calls per trade
+    const walletTradeCache = new Map<string, AggregatedTrade[]>();
+    const walletsToCache = options.wallet && targetAccountHistory
+      ? [options.wallet.toLowerCase()]
+      : [...candidateWallets];
+
+    if (walletsToCache.length > 0) {
+      console.log(`  Pre-computing trade histories for ${walletsToCache.length} candidates...`);
+      for (const wallet of walletsToCache) {
+        const fills = this.tradeDb.getFillsForWallet(wallet, { role: 'both' });
+        if (fills.length === 0) continue;
+
+        // Get market metadata
+        const tokenIds = [...new Set(fills.map(f => f.market))];
+        const markets = this.tradeDb.getMarketsForTokenIds(tokenIds);
+
+        // Build tokenToOutcome map using outcomeIndex (0 = YES, 1 = NO)
+        // This is more reliable than string matching for non-binary markets (e.g., "Up"/"Down")
+        const tokenToOutcome = new Map<string, 'YES' | 'NO'>();
+        for (const tokenId of tokenIds) {
+          const market = markets.get(tokenId);
+          tokenToOutcome.set(tokenId.toLowerCase(),
+            market?.outcomeIndex === 0 ? 'YES' : 'NO');
+        }
+
+        // Convert to SubgraphTrade format
+        const subgraphFills: SubgraphTrade[] = fills.map(f => ({
+          id: f.id,
+          transactionHash: f.transactionHash,
+          timestamp: f.timestamp,
+          maker: f.maker,
+          taker: f.taker,
+          marketId: f.market,
+          side: f.side,
+          size: f.size.toString(),
+          price: (f.price / 1e6).toString(),
+        }));
+
+        // Aggregate once for this wallet
+        const aggregated = aggregateFills(subgraphFills, { wallet, tokenToOutcome });
+        walletTradeCache.set(wallet, aggregated);
+      }
+    }
+
     // === PHASE 3: Final scoring with account data ===
     console.log(`Phase 3: Final scoring with account histories...`);
 
@@ -277,10 +344,38 @@ export class AnalyzeCommand {
         ? targetAccountHistory
         : accountHistories.get(trade.wallet.toLowerCase());
 
+      // Get point-in-time volume from pre-computed cache (fast O(n) filter instead of O(n) DB queries)
+      let historicalState: SignalContext['historicalState'];
+      if (accountHistory) {
+        const cachedTrades = walletTradeCache.get(trade.wallet.toLowerCase());
+        if (cachedTrades) {
+          const tradeTimestamp = trade.timestamp.getTime() / 1000;
+          const priorTrades = cachedTrades.filter(t => t.timestamp.getTime() / 1000 < tradeTimestamp);
+          const priorVolume = priorTrades.reduce((sum, t) => sum + t.totalValueUsd, 0);
+
+          // Find most recent prior trade for dormancy calculation
+          const lastPriorTrade = priorTrades.length > 0
+            ? priorTrades.reduce((latest, t) =>
+              t.timestamp.getTime() > latest.timestamp.getTime() ? t : latest)
+            : null;
+
+          historicalState = {
+            tradeCount: priorTrades.length,
+            volume: Math.round(priorVolume * 1e6),
+            pnl: 0, // TODO: Calculate point-in-time PnL from priorTrades
+            lastTradeTimestamp: lastPriorTrade
+              ? Math.floor(lastPriorTrade.timestamp.getTime() / 1000)
+              : undefined,
+            approximate: false,
+          };
+        }
+      }
+
       // Final score with all context
       const fullContext: SignalContext = {
         config: this.config,
         accountHistory,
+        historicalState,
       };
       const fullResults = await Promise.all(
         this.signals.map(s => s.calculate(trade, fullContext))
@@ -329,17 +424,14 @@ export class AnalyzeCommand {
 
     // Opportunistic backfill after analysis
     try {
-      const { TradeDB } = await import('../db/index.js');
       const { runBackfill } = await import('../db/backfill.js');
 
-      const db = new TradeDB();
-      const queue = db.getBackfillQueue();
+      const queue = this.tradeDb.getBackfillQueue();
 
       if (queue.length > 0 && this.subgraphClient) {
         console.log(`\nBackfilling ${Math.min(5, queue.length)} wallets from queue...`);
-        await runBackfill(db, this.subgraphClient, { maxWallets: 5 });
+        await runBackfill(this.tradeDb, this.subgraphClient, { maxWallets: 5 });
       }
-      db.close();
     } catch (e) {
       // Don't fail analysis if backfill fails
       console.error('Backfill error:', (e as Error).message);
@@ -349,31 +441,158 @@ export class AnalyzeCommand {
   }
 
   /**
-   * Fetch raw fills from subgraph for aggregation
+   * Fetch raw fills with DB-first caching strategy.
+   * Checks cache coverage per token, fetches only missing ranges, updates sync watermarks.
    */
-  private async fetchRawFills(
+  private async fetchRawFillsWithCache(
     market: Market,
     options: AnalyzeOptions
   ): Promise<SubgraphTrade[]> {
     if (!this.subgraphClient) return [];
 
+    const cacheChecker = new TradeCacheChecker(this.tradeDb);
     const totalLimit = options.maxTrades ?? 10000;
     const perTokenLimit = Math.ceil(totalLimit / market.tokens.length);
 
     const allFills: SubgraphTrade[] = [];
+
     for (const token of market.tokens) {
-      console.log(`Fetching fills for ${token.outcome} token (${token.tokenId.slice(0, 10)}...)...`);
-      const fills = await this.subgraphClient.getTradesByMarket(token.tokenId, {
-        limit: perTokenLimit,
-        after: options.after,
-        before: options.before,
-        orderDirection: 'desc',
+      const requestedRange = {
+        after: options.after ? Math.floor(options.after.getTime() / 1000) : undefined,
+        before: options.before ? Math.floor(options.before.getTime() / 1000) : undefined,
+      };
+
+      const cacheResult = cacheChecker.checkCoverage(token.tokenId, requestedRange);
+      const reason = cacheResult.needsFetch.reason;
+
+      if (reason !== 'none') {
+        // Fetch from subgraph (only missing range if partial)
+        const fetchLabel = this.getFetchLabel(reason, cacheResult.needsFetch);
+        console.log(`Fetching ${token.outcome} trades from subgraph (${fetchLabel})...`);
+
+        const newFills = await this.fetchRawFillsForToken(token, {
+          after: cacheResult.needsFetch.after !== undefined
+            ? new Date(cacheResult.needsFetch.after * 1000)
+            : options.after,
+          before: cacheResult.needsFetch.before !== undefined
+            ? new Date(cacheResult.needsFetch.before * 1000)
+            : options.before,
+          limit: perTokenLimit,
+        });
+
+        // Save new fills to DB
+        if (newFills.length > 0) {
+          const saved = this.saveTradesFromFills(newFills);
+          if (saved > 0) {
+            console.log(`  Saved ${saved} trade records to DB`);
+          }
+
+          // Update sync watermarks
+          const timestamps = newFills.map(f => f.timestamp);
+          const minTs = Math.min(...timestamps);
+          const maxTs = Math.max(...timestamps);
+
+          const currentSync = this.tradeDb.getMarketSync(token.tokenId);
+          this.tradeDb.updateMarketSync(token.tokenId, {
+            syncedFrom: currentSync?.syncedFrom ? Math.min(currentSync.syncedFrom, minTs) : minTs,
+            syncedTo: currentSync?.syncedTo ? Math.max(currentSync.syncedTo, maxTs) : maxTs,
+          });
+        }
+      } else {
+        const cachedCount = this.tradeDb.getFillsForMarket(token.tokenId).length;
+        console.log(`Using cached ${token.outcome} trades (${cachedCount} fills)`);
+      }
+
+      // Read from DB (includes both cached and newly saved)
+      // Note: Don't limit per-token here - let the final sort+limit handle it
+      // This ensures we get all fills including older maker fills needed for
+      // proper complementary trade detection in cross-matched transactions
+      const dbFills = this.tradeDb.getFillsForMarket(token.tokenId, {
+        after: requestedRange.after,
+        before: requestedRange.before,
+        // No per-token limit - apply total limit after combining both tokens
       });
+
+      // Convert DBEnrichedOrderFill back to SubgraphTrade format for aggregation
+      const fills = this.convertDBFillsToSubgraph(dbFills);
       allFills.push(...fills);
     }
 
-    // Sort by timestamp descending
+    // Sort by timestamp descending and apply total limit
     allFills.sort((a, b) => b.timestamp - a.timestamp);
     return allFills.slice(0, totalLimit);
+  }
+
+  /**
+   * Get human-readable label for fetch reason
+   */
+  private getFetchLabel(reason: FetchReason, needsFetch: { after?: number; before?: number }): string {
+    switch (reason) {
+      case 'missing':
+        return 'not cached';
+      case 'stale':
+        return 'cache stale';
+      case 'partial-older':
+        return `fetching older trades before ${new Date((needsFetch.before ?? 0) * 1000).toISOString().split('T')[0]}`;
+      case 'partial-newer':
+        return `fetching newer trades after ${new Date((needsFetch.after ?? 0) * 1000).toISOString().split('T')[0]}`;
+      default:
+        return reason;
+    }
+  }
+
+  /**
+   * Fetch raw fills from subgraph for a single token
+   */
+  private async fetchRawFillsForToken(
+    token: MarketToken,
+    options: { after?: Date; before?: Date; limit?: number }
+  ): Promise<SubgraphTrade[]> {
+    if (!this.subgraphClient) return [];
+
+    return this.subgraphClient.getTradesByMarket(token.tokenId, {
+      limit: options.limit ?? 10000,
+      after: options.after,
+      before: options.before,
+      orderDirection: 'desc',
+    });
+  }
+
+  /**
+   * Save SubgraphTrade fills to DB (one row per fill)
+   */
+  private saveTradesFromFills(fills: SubgraphTrade[]): number {
+    const dbFills: DBEnrichedOrderFill[] = fills.map(fill => ({
+      id: fill.id,
+      transactionHash: fill.transactionHash,
+      timestamp: fill.timestamp,
+      orderHash: (fill as any).orderHash ?? fill.id, // Use id as fallback if orderHash missing
+      side: fill.side,
+      size: parseInt(fill.size),
+      price: Math.round(parseFloat(fill.price) * 1e6),
+      maker: fill.maker.toLowerCase(),
+      taker: fill.taker.toLowerCase(),
+      market: fill.marketId,
+    }));
+
+    return this.tradeDb.saveFills(dbFills);
+  }
+
+  /**
+   * Convert DBEnrichedOrderFill records back to SubgraphTrade format for aggregation
+   */
+  private convertDBFillsToSubgraph(dbFills: DBEnrichedOrderFill[]): SubgraphTrade[] {
+    return dbFills.map(f => ({
+      id: f.id,
+      transactionHash: f.transactionHash,
+      timestamp: f.timestamp,
+      orderHash: f.orderHash,
+      maker: f.maker,
+      taker: f.taker,
+      marketId: f.market,
+      side: f.side,
+      size: f.size.toString(),
+      price: (f.price / 1e6).toString(), // Convert back to decimal string
+    }));
   }
 }

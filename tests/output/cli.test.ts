@@ -687,7 +687,7 @@ describe('CLIReporter', () => {
         expect(output).toContain('+$8,000'); // Trading P&L = valueSold - valueBought
       });
 
-      it('shows closed position with zero shares', () => {
+      it('shows zero shares for closed position', () => {
         const report = createMockWalletReport({
           positions: [
             createMockSubgraphPosition({
@@ -698,7 +698,8 @@ describe('CLIReporter', () => {
         });
         const output = reporter.formatWalletReport(report);
 
-        expect(output).toContain('closed');
+        // Closed positions show "0" in the shares column (dim styled)
+        expect(output).toMatch(/\s0\s/);
       });
 
       it('limits positions display to 15', () => {
@@ -806,7 +807,7 @@ describe('CLIReporter', () => {
         expect(output).toContain('Position redeemed but shares not yet updated');
       });
 
-      it('shows "redeemed" in shares column when netQuantity is 0 and has redemption', () => {
+      it('shows zero shares when position is redeemed (netQuantity is 0)', () => {
         const tokenId = '12345678901234567890';
         const conditionId = '0xcondition-redeemed';
 
@@ -832,7 +833,9 @@ describe('CLIReporter', () => {
 
         const output = reporter.formatWalletReport(report);
 
-        expect(output).toContain('redeemed');
+        // Redeemed positions show "0" in shares column and redemption amount in Realized
+        expect(output).toMatch(/\s0\s/);
+        expect(output).toContain('+$10,000'); // Redemption payout
       });
 
       it('aggregates multiple redemptions for same conditionId', () => {

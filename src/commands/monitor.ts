@@ -74,8 +74,21 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
     retries: config.subgraph.retries,
   });
 
+  // Initialize database for account caching and idle backfill
+  let db: TradeDB | null = null;
+  try {
+    const { TradeDB } = await import('../db/index.js');
+    db = new TradeDB();
+  } catch (e) {
+    // DB not available, continue without caching
+    if (options.verbose) {
+      console.log(chalk.dim('Database not available, account caching disabled'));
+    }
+  }
+
   const accountFetcher = new AccountFetcher({
     subgraphClient,
+    tradeDb: db ?? undefined,
   });
 
   const evaluator = new MonitorEvaluator({
@@ -101,7 +114,6 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
 
   // Idle backfill timer - triggers after 30s with no trades
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  let db: TradeDB | null = null;
   const IDLE_BACKFILL_DELAY_MS = 30000; // 30 seconds
 
   const resetIdleTimer = () => {
@@ -112,17 +124,6 @@ export async function executeMonitor(options: MonitorOptions): Promise<void> {
       await runIdleBackfill(subgraphClient, db);
     }, IDLE_BACKFILL_DELAY_MS);
   };
-
-  // Initialize database for idle backfill
-  try {
-    const { TradeDB } = await import('../db/index.js');
-    db = new TradeDB();
-  } catch (e) {
-    // DB not available, skip idle backfill
-    if (options.verbose) {
-      console.log(chalk.dim('Database not available, skipping idle backfill'));
-    }
-  }
 
   // Display startup banner
   console.log(formatMonitorBanner(

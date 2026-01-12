@@ -37,7 +37,7 @@ describe('Migration', () => {
       const result = importJsonCaches(db, testCacheDir);
 
       expect(result.trades).toBe(1);
-      expect(db.getStatus().trades).toBe(1);
+      expect(db.getStatus().fills).toBe(1);
     });
 
     it('imports accounts from JSON cache files', () => {
