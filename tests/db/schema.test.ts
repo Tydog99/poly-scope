@@ -31,6 +31,7 @@ describe('Database Schema', () => {
     expect(tableNames).toContain('redemptions');
     expect(tableNames).toContain('markets');
     expect(tableNames).toContain('backfill_queue');
+    expect(tableNames).toContain('price_history');
     expect(tableNames).toContain('schema_version');
   });
 
@@ -48,6 +49,7 @@ describe('Database Schema', () => {
     expect(indexNames).toContain('idx_fills_market');
     expect(indexNames).toContain('idx_fills_tx');
     expect(indexNames).toContain('idx_redemptions_wallet');
+    expect(indexNames).toContain('idx_prices_token_time');
   });
 
   it('sets WAL mode for better concurrency', () => {

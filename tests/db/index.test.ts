@@ -44,6 +44,7 @@ describe('TradeDB', () => {
         redemptions: 0,
         markets: 0,
         backfillQueue: 0,
+        priceHistory: 0,
       });
     });
   });

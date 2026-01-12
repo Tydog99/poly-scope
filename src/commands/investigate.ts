@@ -10,6 +10,7 @@ import type { SuspiciousTrade } from '../output/types.js';
 import { aggregateFills } from '../api/aggregator.js';
 import { buildTokenToOutcomeFromResolved, scoreTrades } from './shared.js';
 import { TradeDB } from '../db/index.js';
+import { PriceFetcher } from '../api/prices.js';
 
 export interface InvestigateOptions {
   wallet: string;
@@ -48,6 +49,7 @@ export class InvestigateCommand {
   private polymarketClient: PolymarketClient;
   private subgraphClient: SubgraphClient | null;
   private tradeDb: TradeDB;
+  private priceFetcher: PriceFetcher;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
 
@@ -65,6 +67,7 @@ export class InvestigateCommand {
 
     // Initialize database for account caching
     this.tradeDb = new TradeDB();
+    this.priceFetcher = new PriceFetcher(this.tradeDb);
 
     this.accountFetcher = new AccountFetcher({
       subgraphClient: this.subgraphClient,
@@ -221,9 +224,30 @@ export class InvestigateCommand {
       analyzedTradeCount = aggregatedTrades.length;
       console.log(`Analyzing ${analyzedTradeCount} aggregated trades for suspicious patterns...`);
 
+      // Fetch price history for market impact calculation
+      let marketPrices: Map<string, import('../signals/types.js').PricePoint[]> | undefined;
+      const tokenIds = [...new Set(aggregatedTrades.map(t => t.marketId))];
+      if (tokenIds.length > 0) {
+        const { startTs, endTs } = this.getTradeTimeRange(aggregatedTrades);
+        console.log(`Fetching price history for ${tokenIds.length} tokens...`);
+        const priceData = await this.priceFetcher.getPricesForMarket(tokenIds, startTs, endTs);
+
+        marketPrices = new Map();
+        for (const [tokenId, prices] of priceData) {
+          marketPrices.set(tokenId, prices.map(p => ({
+            timestamp: new Date(p.timestamp * 1000),
+            price: p.price,
+          })));
+        }
+
+        const totalPrices = [...priceData.values()].reduce((sum, p) => sum + p.length, 0);
+        console.log(`  Loaded ${totalPrices} price points`);
+      }
+
       const context: SignalContext = {
         config: this.config,
         accountHistory: accountHistory ?? undefined,
+        marketPrices,
       };
 
       const scoredTrades = await scoreTrades(
@@ -282,6 +306,20 @@ export class InvestigateCommand {
       suspiciousTrades,
       analyzedTradeCount,
       marketSummary,
+    };
+  }
+
+  private getTradeTimeRange(trades: AggregatedTrade[]): { startTs: number; endTs: number } {
+    if (trades.length === 0) {
+      const now = Math.floor(Date.now() / 1000);
+      return { startTs: now - 300, endTs: now };
+    }
+
+    const timestamps = trades.map(t => Math.floor(t.timestamp.getTime() / 1000));
+    const buffer = 5 * 60;  // 5 minute buffer
+    return {
+      startTs: Math.min(...timestamps) - buffer,
+      endTs: Math.max(...timestamps) + buffer,
     };
   }
 

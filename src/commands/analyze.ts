@@ -13,6 +13,7 @@ import type { Market, SubgraphTrade, MarketToken, AggregatedTrade } from '../api
 import { buildTokenToOutcome, buildTokenToOutcomeFromResolved, aggregateFillsPerWallet } from './shared.js';
 import { TradeDB, type DBEnrichedOrderFill } from '../db/index.js';
 import { TradeCacheChecker, type FetchReason } from '../api/trade-cache.js';
+import { PriceFetcher } from '../api/prices.js';
 
 export interface AnalyzeOptions {
   marketId: string;
@@ -41,6 +42,7 @@ export class AnalyzeCommand {
   private accountFetcher: AccountFetcher;
   private subgraphClient: SubgraphClient | null;
   private tradeDb: TradeDB;
+  private priceFetcher: PriceFetcher;
   private signals: [TradeSizeSignal, AccountHistorySignal, ConvictionSignal];
   private aggregator: SignalAggregator;
   private classifier: TradeClassifier;
@@ -62,6 +64,7 @@ export class AnalyzeCommand {
 
     // Initialize database for account caching
     this.tradeDb = new TradeDB();
+    this.priceFetcher = new PriceFetcher(this.tradeDb);
 
     this.tradeFetcher = new TradeFetcher({
       subgraphClient: this.subgraphClient,
@@ -77,6 +80,20 @@ export class AnalyzeCommand {
     ];
     this.aggregator = new SignalAggregator(config);
     this.classifier = new TradeClassifier(config);
+  }
+
+  private getTradeTimeRange(trades: Trade[]): { startTs: number; endTs: number } {
+    if (trades.length === 0) {
+      const now = Math.floor(Date.now() / 1000);
+      return { startTs: now - 300, endTs: now };
+    }
+
+    const timestamps = trades.map(t => Math.floor(t.timestamp.getTime() / 1000));
+    const buffer = 5 * 60;  // 5 minute buffer
+    return {
+      startTs: Math.min(...timestamps) - buffer,
+      endTs: Math.max(...timestamps) + buffer,
+    };
   }
 
   async execute(options: AnalyzeOptions): Promise<AnalysisReport> {
@@ -199,6 +216,28 @@ export class AnalyzeCommand {
       console.log(`Filtered to ${tradesToAnalyze.length} trades for wallet ${options.wallet.slice(0, 8)}...`);
     }
 
+    // Fetch price history for market impact calculation
+    let marketPrices: Map<string, import('../signals/types.js').PricePoint[]> | undefined;
+    if (allTrades.length > 0 && market.tokens?.length > 0) {
+      const tokenIds = market.tokens.map(t => t.tokenId);
+      const { startTs, endTs } = this.getTradeTimeRange(allTrades);
+
+      console.log(`Fetching price history for ${tokenIds.length} tokens...`);
+      const priceData = await this.priceFetcher.getPricesForMarket(tokenIds, startTs, endTs);
+
+      // Convert to PricePoint format (Date timestamp)
+      marketPrices = new Map();
+      for (const [tokenId, prices] of priceData) {
+        marketPrices.set(tokenId, prices.map(p => ({
+          timestamp: new Date(p.timestamp * 1000),
+          price: p.price,
+        })));
+      }
+
+      const totalPrices = [...priceData.values()].reduce((sum, p) => sum + p.length, 0);
+      console.log(`  Loaded ${totalPrices} price points`);
+    }
+
     // === WALLET MODE: Fetch target account upfront ===
     let targetAccountHistory: import('../signals/types.js').AccountHistory | undefined;
     if (options.wallet) {
@@ -240,7 +279,7 @@ export class AnalyzeCommand {
       }
 
       // Quick score (without account history)
-      const quickContext: SignalContext = { config: this.config };
+      const quickContext: SignalContext = { config: this.config, marketPrices };
       const quickResults = await Promise.all(
         this.signals.map(s => s.calculate(trade, quickContext))
       );
@@ -376,6 +415,7 @@ export class AnalyzeCommand {
         config: this.config,
         accountHistory,
         historicalState,
+        marketPrices,
       };
       const fullResults = await Promise.all(
         this.signals.map(s => s.calculate(trade, fullContext))

@@ -22,7 +22,7 @@ export interface Signal {
 export interface SignalContext {
   config: import('../config.js').Config;
   accountHistory?: AccountHistory;
-  marketPrices?: PricePoint[];
+  marketPrices?: Map<string, PricePoint[]>;  // tokenId -> prices
   // Point-in-time historical state (optional, from DB)
   historicalState?: {
     tradeCount: number;
