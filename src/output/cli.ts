@@ -361,7 +361,7 @@ export class CLIReporter {
       String(convScore).padStart(4),
       chalk.gray(this.formatTime(st.trade.timestamp)),
       walletColor(this.formatWalletLink(st.trade.wallet)),
-      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
+      `${st.trade.side.padEnd(4)} ${st.trade.outcome.padEnd(3)} ${this.formatUsd(st.trade.totalValueUsd).padStart(10)} @${st.trade.avgPrice.toFixed(2)}`,
       tags,
     ];
 
@@ -943,7 +943,7 @@ export class CLIReporter {
       String(convScore).padStart(4),
       chalk.gray(timeStr),
       marketDisplay.padEnd(36),
-      `${this.formatUsd(st.trade.totalValueUsd).padStart(10)} ${st.trade.outcome.padEnd(3)} @${st.trade.avgPrice.toFixed(2)}`,
+      `${st.trade.side.padEnd(4)} ${st.trade.outcome.padEnd(3)} ${this.formatUsd(st.trade.totalValueUsd).padStart(10)} @${st.trade.avgPrice.toFixed(2)}`,
     ];
 
     return '  ' + cols.join('  ');

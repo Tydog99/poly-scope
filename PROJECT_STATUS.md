@@ -1,6 +1,6 @@
 # Project Status - Polymarket Insider Trading Detector
 
-Last updated: 2026-01-09
+Last updated: 2026-01-11
 
 ## 1. Current Implementation - Fully Functional
 
@@ -246,6 +246,25 @@ Historical analysis now uses **point-in-time account state** from the database i
 | ConvictionSignal | `totalVolumeUsd` | **Fixed** | Uses `historicalState.volume` computed from trades before analyzed timestamp |
 
 **Requirements**: Point-in-time analysis requires the wallet's trade history to be backfilled. The system automatically queues wallets for backfill during analysis and marks results as "approximate" when history is incomplete.
+
+### Profit Signal Reconsideration
+
+The **profit component** of AccountHistorySignal (up to 25 points) may need to be removed or redesigned:
+
+**Current behavior**: Scores high when an account has high ROI (profit/volume) on a new account (<90 days).
+
+**Problem for point-in-time analysis**:
+- At trade time, we use `historicalState.pnl` which is the cumulative profit from trades *before* this one
+- For early trades (especially the first), this is always $0 - providing no signal value
+- The original intent was to flag accounts that *already* demonstrated suspicious predictive ability
+- But calculating true point-in-time realized PnL requires tracking position open/close cycles, which is complex
+
+**Options**:
+1. **Remove profit scoring entirely** - Simplify to 3-component scoring (trade count, age, dormancy)
+2. **Keep as post-hoc indicator** - Only use profit for investigation reports, not real-time scoring
+3. **Redesign as win-rate signal** - Track % of closed positions that were profitable (requires position tracking)
+
+Currently using option 1's behavior implicitly (pnl=0 for point-in-time) but the code still has the profit scoring logic.
 
 ### Technical Considerations
 
