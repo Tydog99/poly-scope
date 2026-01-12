@@ -6,7 +6,8 @@ export class TradeSizeSignal implements Signal {
   weight = 40;
 
   async calculate(trade: AggregatedTrade, context: SignalContext): Promise<SignalResult> {
-    const { config, marketPrices = [] } = context;
+    const { config, marketPrices } = context;
+    const tokenPrices = marketPrices?.get(trade.marketId) ?? [];
     const { minAbsoluteUsd, minImpactPercent, impactWindowMinutes } = config.tradeSize;
 
     // Check minimum threshold
@@ -24,7 +25,7 @@ export class TradeSizeSignal implements Signal {
     const sizeScore = Math.min(50, Math.log10(sizeMultiple) * 25 + 25);
 
     // Calculate impact score (0-50 points)
-    const impact = this.calculateImpact(trade, marketPrices, impactWindowMinutes);
+    const impact = this.calculateImpact(trade, tokenPrices, impactWindowMinutes);
     const impactScore = impact >= minImpactPercent
       ? Math.min(50, (impact / minImpactPercent) * 25)
       : 0;

@@ -35,7 +35,7 @@ export class PriceFetcher {
         return [];
       }
 
-      const data: CLOBPriceResponse = await response.json();
+      const data = await response.json() as CLOBPriceResponse;
       return data.history.map(p => ({
         timestamp: p.t,
         price: p.p,

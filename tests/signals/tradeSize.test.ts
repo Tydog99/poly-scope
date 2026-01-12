@@ -73,8 +73,7 @@ describe('TradeSizeSignal with Map-based prices', () => {
     fills: [],
   };
 
-  // TODO: Unskip after Task 5 updates TradeSizeSignal to use Map
-  it.skip('calculates impact from per-token price Map', async () => {
+  it('calculates impact from per-token price Map', async () => {
     const pricesMap = new Map<string, PricePoint[]>();
     pricesMap.set('token-456', [
       { timestamp: new Date(999700 * 1000), price: 0.4 },

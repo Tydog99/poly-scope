@@ -134,7 +134,7 @@ export class MonitorEvaluator {
     const context: SignalContext = {
       config: this.config,
       accountHistory: account,
-      marketPrices: [], // Real-time monitoring doesn't have historical prices
+      marketPrices: new Map(), // Real-time monitoring doesn't have historical prices
     };
 
     // Run all signals in parallel
