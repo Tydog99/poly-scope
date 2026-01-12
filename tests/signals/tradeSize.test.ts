@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { TradeSizeSignal } from '../../src/signals/tradeSize.js';
 import type { AggregatedTrade } from '../../src/api/types.js';
-import type { SignalContext } from '../../src/signals/types.js';
+import type { SignalContext, PricePoint } from '../../src/signals/types.js';
 import { loadConfig } from '../../src/config.js';
 
 describe('TradeSizeSignal', () => {
@@ -53,5 +53,49 @@ describe('TradeSizeSignal', () => {
     const trade = makeTrade(5000000); // 1000x threshold
     const result = await signal.calculate(trade, baseContext);
     expect(result.score).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('TradeSizeSignal with Map-based prices', () => {
+  const signal = new TradeSizeSignal();
+
+  const mockTrade: AggregatedTrade = {
+    transactionHash: '0xabc',
+    wallet: '0x123',
+    marketId: 'token-456',
+    outcome: 'YES',
+    side: 'BUY',
+    avgPrice: 0.5,
+    totalSize: 1000,
+    totalValueUsd: 5000,
+    timestamp: new Date(1000000 * 1000),
+    fillCount: 1,
+    fills: [],
+  };
+
+  // TODO: Unskip after Task 5 updates TradeSizeSignal to use Map
+  it.skip('calculates impact from per-token price Map', async () => {
+    const pricesMap = new Map<string, PricePoint[]>();
+    pricesMap.set('token-456', [
+      { timestamp: new Date(999700 * 1000), price: 0.4 },
+      { timestamp: new Date(1000300 * 1000), price: 0.5 },
+    ]);
+
+    const context: SignalContext = {
+      config: {
+        tradeSize: { minAbsoluteUsd: 1000, minImpactPercent: 5, impactWindowMinutes: 5 },
+        accountHistory: { maxAgeDays: 30, maxTradeCount: 50, dormancyDays: 90 },
+        conviction: { highConvictionThreshold: 0.85 },
+        alertThreshold: 70,
+        filters: { excludeSafeBets: true, safeBetThreshold: 0.9 },
+        subgraph: { enabled: true, timeout: 30000, retries: 3 },
+      },
+      marketPrices: pricesMap,
+    };
+
+    const result = await signal.calculate(mockTrade, context);
+    // This test will initially fail because TradeSizeSignal expects array, not Map
+    // It should pass after Task 5 updates TradeSizeSignal
+    expect(result.details).toHaveProperty('impactPercent');
   });
 });
